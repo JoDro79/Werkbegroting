@@ -145,13 +145,37 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       };
     });
 
+    // Stap 6: posten die NIET in de planning zijn gekoppeld tellen wel mee in de totalen
+    // maar worden uniform verdeeld over de projectduur
+    const gekoppeldeHoofdstukken = new Set();
+    tasks.forEach(task => {
+      (koppelingen[task.id] || []).forEach(k => gekoppeldeHoofdstukken.add(k.hoofdstuk));
+    });
+    let ontkoppeldInschrijf = 0, ontkoppeldKosten = 0;
+    posts.forEach(p => {
+      if (!gekoppeldeHoofdstukken.has(p.hoofdstuk)) {
+        ontkoppeldInschrijf += p.hoeveelheid * p.inschrijfprijs;
+        ontkoppeldKosten    += p.hoeveelheid * p.kostprijs;
+      }
+    });
+    // Verdeel ontkoppelde posten uniform over alle maanden
+    const ontkoppeldPerMaand = months.length > 0 ? ontkoppeldInschrijf / months.length : 0;
+    const ontkoppeldKostenPerMaand = months.length > 0 ? ontkoppeldKosten / months.length : 0;
+
     let cumIns = 0, cumKst = 0;
     const cumCats = Array(13).fill(0);
     const cashflowData = monthlyDataMetSK.map(m => {
-      cumIns += m.inschrijf;
-      cumKst += m.kosten;
+      cumIns += m.inschrijf + ontkoppeldPerMaand;
+      cumKst += m.kosten    + ontkoppeldKostenPerMaand;
       m.cats.forEach((c, i) => { cumCats[i] += c; });
-      return { ...m, cumInschrijf: cumIns, cumKosten: cumKst, cumCats: [...cumCats] };
+      return {
+        ...m,
+        inschrijf: m.inschrijf + ontkoppeldPerMaand,
+        kosten:    m.kosten    + ontkoppeldKostenPerMaand,
+        cumInschrijf: cumIns,
+        cumKosten:    cumKst,
+        cumCats: [...cumCats],
+      };
     });
 
     return { months, cashflowData, totals: { totalIns: cumIns, totalKst: cumKst } };
