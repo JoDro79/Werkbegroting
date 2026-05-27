@@ -65,33 +65,33 @@ function inputToDate(s) {
 // ── Stijlen ────────────────────────────────────────────────────────────────────
 const S = {
   input: {
-    background: "#0d1520", border: "1px solid #1e4976", color: "#cfd8dc",
+    background: "#e8eef5", border: "1px solid #1e4976", color: "#2c4a6e",
     padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "inherit",
     outline: "none",
   },
   dateInput: {
-    background: "#0d1520", border: "1px solid #1e4976", color: "#90caf9",
+    background: "#e8eef5", border: "1px solid #1e4976", color: "#1565c0",
     padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "inherit",
     outline: "none", width: 130,
   },
   select: {
-    background: "#0d1520", border: "1px solid #1e4976", color: "#90caf9",
+    background: "#e8eef5", border: "1px solid #1e4976", color: "#1565c0",
     padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "inherit",
     outline: "none",
   },
   btnSmall: {
-    background: "rgba(25,118,210,.15)", border: "1px solid #1e4976",
-    color: "#90caf9", padding: "4px 10px", borderRadius: 4,
+    background: "#cce0f5", border: "1px solid #1e4976",
+    color: "#1565c0", padding: "4px 10px", borderRadius: 4,
     cursor: "pointer", fontSize: 10, fontFamily: "inherit", letterSpacing: 1,
   },
   btnDanger: {
     background: "transparent", border: "none",
-    color: "#37474f", padding: "4px 6px",
+    color: "#8aabca", padding: "4px 6px",
     cursor: "pointer", fontSize: 14, fontFamily: "inherit",
   },
   btnAdd: {
-    background: "rgba(25,118,210,.12)", border: "1px dashed #1e4976",
-    color: "#546e7a", padding: "7px 14px", borderRadius: 6,
+    background: "#d6e6f8", border: "1px dashed #1e4976",
+    color: "#6b8caa", padding: "7px 14px", borderRadius: 6,
     cursor: "pointer", fontSize: 11, fontFamily: "inherit",
     width: "100%", textAlign: "left", marginTop: 4,
   },
@@ -317,21 +317,21 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
       <div style={{ maxWidth: 680, margin: "50px auto", padding: "0 20px" }}>
         <div style={{ textAlign: "center", marginBottom: 28 }}>
           <div style={{ fontSize: 38, marginBottom: 12 }}>📅</div>
-          <h2 style={{ fontSize: 17, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 8 }}>UITVOERINGSPLANNING</h2>
-          <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.9 }}>Laad een planningsbestand of maak de planning handmatig aan.</p>
+          <h2 style={{ fontSize: 17, fontWeight: 900, color: "#1565c0", letterSpacing: 2, marginBottom: 8 }}>UITVOERINGSPLANNING</h2>
+          <p style={{ fontSize: 12, color: "#6b8caa", lineHeight: 1.9 }}>Laad een planningsbestand of maak de planning handmatig aan.</p>
         </div>
         <div
-          style={{ border: "2px dashed #1e4976", borderRadius: 12, padding: "24px 20px", marginBottom: 14, background: "rgba(25,118,210,.03)", cursor: "pointer", transition: "all .2s" }}
+          style={{ border: "2px dashed #1e4976", borderRadius: 12, padding: "24px 20px", marginBottom: 14, background: "#f5f9fe", cursor: "pointer", transition: "all .2s" }}
           onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#42a5f5"; }}
-          onDragLeave={e => { e.currentTarget.style.borderColor="#1e4976"; }}
-          onDrop={e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#1e4976"; const f=e.dataTransfer.files[0]; if(f) parseExcelPlanning(f); }}
+          onDragLeave={e => { e.currentTarget.style.borderColor="#b0cce8"; }}
+          onDrop={e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#b0cce8"; const f=e.dataTransfer.files[0]; if(f) parseExcelPlanning(f); }}
           onClick={() => document.getElementById("planningUploadInput").click()}
         >
           <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
             <span style={{ fontSize: 26 }}>📂</span>
             <div style={{ flex: 1 }}>
-              <div style={{ fontSize: 13, fontWeight: 700, color: "#90caf9", marginBottom: 3 }}>Excel planningsbestand uploaden</div>
-              <div style={{ fontSize: 11, color: "#546e7a" }}>Sleep het bestand hierheen — tabblad "App Import" wordt automatisch herkend</div>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#1565c0", marginBottom: 3 }}>Excel planningsbestand uploaden</div>
+              <div style={{ fontSize: 11, color: "#6b8caa" }}>Sleep het bestand hierheen — tabblad "App Import" wordt automatisch herkend</div>
             </div>
             <span style={{ background: "linear-gradient(135deg,#1976d2,#0d47a1)", color: "#fff", padding: "7px 16px", borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>KIEZEN</span>
           </div>
@@ -339,14 +339,14 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
         <input id="planningUploadInput" type="file" accept=".xlsx,.xls" style={{ display: "none" }}
           onChange={e => { if (e.target.files[0]) { parseExcelPlanning(e.target.files[0]); e.target.value=""; } }} />
         {uploadError && (
-          <div style={{ padding: "9px 13px", background: "rgba(230,81,0,.12)", border: "1px solid #e65100", borderRadius: 7, fontSize: 11, color: "#ff8a65", marginBottom: 12 }}>⚠ {uploadError}</div>
+          <div style={{ padding: "9px 13px", background: "rgba(230,81,0,.08)", border: "1px solid #e65100", borderRadius: 7, fontSize: 11, color: "#ff8a65", marginBottom: 12 }}>⚠ {uploadError}</div>
         )}
         <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
-          <div style={{ flex: 1, height: 1, background: "#1e4976" }} /><span style={{ fontSize: 10, color: "#37474f" }}>OF</span><div style={{ flex: 1, height: 1, background: "#1e4976" }} />
+          <div style={{ flex: 1, height: 1, background: "#b0cce8" }} /><span style={{ fontSize: 10, color: "#8aabca" }}>OF</span><div style={{ flex: 1, height: 1, background: "#b0cce8" }} />
         </div>
         <div style={{ display: "flex", gap: 10 }}>
-          <button onClick={initDefault} style={{ flex: 1, background: "rgba(25,118,210,.12)", border: "1px solid #1e4976", color: "#90caf9", padding: "12px 18px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit" }}>✦ STANDAARD WERKPAKKETTEN</button>
-          <button onClick={() => addTask(null)} style={{ background: "transparent", border: "1px solid #1e4976", color: "#546e7a", padding: "12px 18px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit" }}>+ LEEG BEGIN</button>
+          <button onClick={initDefault} style={{ flex: 1, background: "#d6e6f8", border: "1px solid #1e4976", color: "#1565c0", padding: "12px 18px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit" }}>✦ STANDAARD WERKPAKKETTEN</button>
+          <button onClick={() => addTask(null)} style={{ background: "transparent", border: "1px solid #1e4976", color: "#6b8caa", padding: "12px 18px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit" }}>+ LEEG BEGIN</button>
         </div>
       </div>
     );
@@ -360,16 +360,16 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h2 style={{ fontSize: 15, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 3 }}>
+          <h2 style={{ fontSize: 15, fontWeight: 900, color: "#1565c0", letterSpacing: 2, marginBottom: 3 }}>
             KOPPELING PLANNING ↔ BEGROTING
           </h2>
-          <p style={{ fontSize: 11, color: "#546e7a" }}>
+          <p style={{ fontSize: 11, color: "#6b8caa" }}>
             {tasks.length} taken · {Object.keys(koppelingen).filter(k => totalPct(k) === 100).length} volledig gekoppeld
           </p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button onClick={() => addTask(null)} style={{
-            ...S.btnSmall, background: "rgba(25,118,210,.2)", fontWeight: 700,
+            ...S.btnSmall, background: "#c0d8f2", fontWeight: 700,
           }}>+ WERKPAKKET</button>
           <button onClick={() => { setTasks([]); setKoppelingen({}); }} style={S.btnSmall}>
             ↩ RESET
@@ -378,7 +378,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
       </div>
 
       {/* Legend */}
-      <div style={{ display: "flex", gap: 16, marginBottom: 14, fontSize: 10, color: "#546e7a" }}>
+      <div style={{ display: "flex", gap: 16, marginBottom: 14, fontSize: 10, color: "#6b8caa" }}>
         <span>🟢 koppeling 100%</span>
         <span>🟡 onvolledig</span>
         <span>⚪ niet gekoppeld</span>
@@ -403,14 +403,14 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
             <div key={task.id} style={{
               marginLeft: indent,
               borderRadius: 8,
-              border: `1px solid ${isOk ? "#1b5e20" : hasAny ? "#e65100" : "#1e4976"}`,
+              border: `1px solid ${isOk ? "#1b5e20" : hasAny ? "#e65100" : "#b0cce8"}`,
               overflow: "hidden",
             }}>
               {/* Task header row */}
               <div style={{
                 display: "flex", alignItems: "center", gap: 8,
                 padding: "8px 12px",
-                background: isOk ? "rgba(46,125,50,.1)" : hasAny ? "rgba(230,81,0,.07)" : "rgba(255,255,255,.02)",
+                background: isOk ? "rgba(27,94,32,.08)" : hasAny ? "rgba(230,81,0,.06)" : "#f8fafc",
                 flexWrap: "wrap",
               }}>
                 {/* Status dot */}
@@ -425,7 +425,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
                   style={{
                     ...S.input,
                     fontWeight: isSubtask ? 400 : 700,
-                    color: isSubtask ? "#90a4ae" : "#cfd8dc",
+                    color: isSubtask ? "#4a6785" : "#2c4a6e",
                     flex: "1 1 140px",
                     minWidth: 100,
                   }}
@@ -449,14 +449,14 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
 
                 {/* Kosten indicator */}
                 {taskKosten > 0 && (
-                  <span style={{ fontSize: 10, color: "#546e7a", whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: 10, color: "#6b8caa", whiteSpace: "nowrap" }}>
                     {euro(taskKosten)}
                   </span>
                 )}
 
                 {/* % totaal */}
                 {hasAny && (
-                  <span style={{ fontSize: 10, fontWeight: 700, color: isOk ? "#4caf50" : "#ff8a65", whiteSpace: "nowrap" }}>
+                  <span style={{ fontSize: 10, fontWeight: 700, color: isOk ? "#1b5e20" : "#ff8a65", whiteSpace: "nowrap" }}>
                     {tot}%
                   </span>
                 )}
@@ -473,7 +473,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
 
               {/* Koppelingen */}
               {kops.length > 0 && (
-                <div style={{ background: "#080f18", padding: "7px 12px 8px 44px", display: "flex", flexDirection: "column", gap: 5 }}>
+                <div style={{ background: "#edf1f7", padding: "7px 12px 8px 44px", display: "flex", flexDirection: "column", gap: 5 }}>
                   {kops.map((k, idx) => {
                     const kKosten = kostenPerHoofdstuk[k.hoofdstuk] || 0;
                     const toegewezen = kKosten * k.percentage / 100;
@@ -495,10 +495,10 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
                           onChange={e => updateKoppeling(task.id, idx, "percentage", Math.min(100, parseInt(e.target.value) || 0))}
                           style={{ ...S.input, width: 52, textAlign: "right" }}
                         />
-                        <span style={{ fontSize: 10, color: "#37474f" }}>%</span>
+                        <span style={{ fontSize: 10, color: "#8aabca" }}>%</span>
 
                         {kKosten > 0 && (
-                          <span style={{ fontSize: 10, color: "#546e7a", whiteSpace: "nowrap" }}>
+                          <span style={{ fontSize: 10, color: "#6b8caa", whiteSpace: "nowrap" }}>
                             → {euro(toegewezen)}
                           </span>
                         )}

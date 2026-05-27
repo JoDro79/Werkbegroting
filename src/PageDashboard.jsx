@@ -42,7 +42,7 @@ function taskOverlapFraction(task, month) {
 }
 
 const CAT_LABELS = ["Stafkosten","Projectkosten","Werkterrein","Bouwwegen","Sleufloos","Grondverzet","Kabelwerk","Bemaling","Civiel (derden)","Bemaling (derden)","Sleufloos (derden)","Kabelwerk (derden)","Leveranties"];
-const CAT_COLORS = ["#4fc3f7","#81c784","#ffb74d","#f06292","#9575cd","#4db6ac","#fff176","#ff8a65","#a1887f","#90a4ae","#ce93d8","#80cbc4","#e6ee9c"];
+const CAT_COLORS = ["#4fc3f7","#81c784","#ffb74d","#f06292","#9575cd","#4db6ac","#fff176","#ff8a65","#a1887f","#4a6785","#7b1fa2","#80cbc4","#e6ee9c"];
 
 export default function PageDashboard({ posts, tasks, koppelingen, staartkosten, projectName }) {
   const [activeView, setActiveView] = useState("scurve");
@@ -54,7 +54,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       return { months: [], cashflowData: [], totals: {} };
     }
 
-    // Budget per hoofdstuk
+    // Stap 1: budget per hoofdstuk vanuit de begroting
     const inschrijfPerHoofdstuk = {};
     const kostenPerHoofdstuk = {};
     const catsPerHoofdstuk = {};
@@ -62,39 +62,33 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       const ins = p.hoeveelheid * p.inschrijfprijs;
       const kst = p.hoeveelheid * p.kostprijs;
       inschrijfPerHoofdstuk[p.hoofdstuk] = (inschrijfPerHoofdstuk[p.hoofdstuk] || 0) + ins;
-      kostenPerHoofdstuk[p.hoofdstuk] = (kostenPerHoofdstuk[p.hoofdstuk] || 0) + kst;
+      kostenPerHoofdstuk[p.hoofdstuk]    = (kostenPerHoofdstuk[p.hoofdstuk]    || 0) + kst;
       if (!catsPerHoofdstuk[p.hoofdstuk]) catsPerHoofdstuk[p.hoofdstuk] = Array(13).fill(0);
       p.cats.forEach((c, i) => { catsPerHoofdstuk[p.hoofdstuk][i] += p.hoeveelheid * c; });
     });
 
-    // Per hoofdstuk: bereken het totale gewogen "aandeel" van alle gekoppelde taken
-    // Aandeel = percentage-koppeling × taakduur (dagen)
-    // Dit voorkomt dat hetzelfde budget meerdere keren wordt meegeteld.
-    const hoofdstukTotalWeight = {};  // { hoofdstuk: totale gewogen dagen }
+    // Stap 2: per taak het aandeel bepalen van het hoofdstukbudget
+    // Aandeel = (koppelpercentage) / som(koppelpercentages over alle taken voor dit hoofdstuk)
+    // GEEN weging op duur — de procentuele koppeling IS het aandeel.
+    // Voorbeeld: 3 taken elk 100% → "Grondwerk" → elk krijgt 1/3 van het grondwerkbudget.
+    const hoofdstukTotalPct = {};
     tasks.forEach(task => {
       const kops = koppelingen[task.id];
       if (!kops?.length || !task.start || !task.finish) return;
-      const taskDays = Math.max(1, (task.finish - task.start) / 86400000 + 1);
       kops.forEach(kop => {
-        const h = kop.hoofdstuk;
-        hoofdstukTotalWeight[h] = (hoofdstukTotalWeight[h] || 0) + (kop.percentage / 100) * taskDays;
+        hoofdstukTotalPct[kop.hoofdstuk] = (hoofdstukTotalPct[kop.hoofdstuk] || 0) + kop.percentage;
       });
     });
 
-    // Per taak per koppeling: bereken het AANDEEL van het hoofdstukbudget dat aan deze taak toekomt
-    // aandeel = (pct × taakduur) / totalWeight[hoofdstuk]
-    // Dit is het budget dat over de looptijd van deze taak lineair wordt verdeeld.
-    const taskBudget = {};  // { taskId: { hoofdstuk: { inschrijf, kosten, cats } } }
+    // Per taak: budget = (eigen_pct / totaal_pct_voor_dit_hoofdstuk) × hoofdstukbudget
+    const taskBudget = {};
     tasks.forEach(task => {
       const kops = koppelingen[task.id];
       if (!kops?.length || !task.start || !task.finish) return;
-      const taskDays = Math.max(1, (task.finish - task.start) / 86400000 + 1);
       taskBudget[task.id] = {};
       kops.forEach(kop => {
         const h = kop.hoofdstuk;
-        const weight = (kop.percentage / 100) * taskDays;
-        const totalW = hoofdstukTotalWeight[h] || 1;
-        const share = weight / totalW;
+        const share = (kop.percentage / (hoofdstukTotalPct[h] || 100));
         taskBudget[task.id][h] = {
           inschrijf: (inschrijfPerHoofdstuk[h] || 0) * share,
           kosten:    (kostenPerHoofdstuk[h]    || 0) * share,
@@ -103,14 +97,19 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       });
     });
 
-    // Tijdsbereik
-    const validTasks = tasks.filter(t => koppelingen[t.id]?.length > 0 && t.start && t.finish);
+    // Valideer: som van alle taskBudgets per hoofdstuk moet = hoofdstukbudget
+    // (debug check — verwijder in productie als gewenst)
+
+    // Stap 3: tijdsbereik
+    const validTasks = tasks.filter(t => taskBudget[t.id] && t.start && t.finish);
     if (!validTasks.length) return { months: [], cashflowData: [], totals: {} };
     const projectStart = new Date(Math.min(...validTasks.map(t => t.start.getTime())));
     const projectEnd   = new Date(Math.max(...validTasks.map(t => t.finish.getTime())));
     const months = monthsBetween(projectStart, projectEnd);
 
-    // Per maand: verdeel het taakbudget lineair over de looptijd van de taak
+    // Stap 4: per maand de uitvoeringskosten verdelen
+    // frac = fractie van de taak die in deze maand valt
+    // Taakbudget × frac = kosten die in deze maand vallen
     const monthlyData = months.map(month => {
       let inschrijf = 0, kosten = 0;
       const cats = Array(13).fill(0);
@@ -119,7 +118,6 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
         if (!taskBudget[task.id] || !task.start || !task.finish) return;
         const frac = taskOverlapFraction(task, month);
         if (frac === 0) return;
-
         Object.values(taskBudget[task.id]).forEach(budget => {
           inschrijf += budget.inschrijf * frac;
           kosten    += budget.kosten    * frac;
@@ -130,9 +128,26 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       return { month, key: monthKey(month), label: monthLabel(month), inschrijf, kosten, cats };
     });
 
+    // Stap 5: staartkosten bovenop de uitvoeringstotalen
+    // Staartkosten zijn projectgebonden overhead, niet gekoppeld aan specifieke taken.
+    // Ze worden evenredig verdeeld over alle maanden (naar rato van uitvoeringskosten per maand).
+    const totaalUitvoering = monthlyData.reduce((s, m) => s + m.inschrijf, 0);
+    const skInschrijf = staartkosten?.reduce((s, sk) => s + (sk.col9bedrag || sk.pct / 100 * totaalUitvoering), 0) || 0;
+    const skKosten    = staartkosten?.reduce((s, sk) => s + (sk.interneKosten || 0), 0) || 0;
+
+    // Verdeel staartkosten naar rato van maandelijkse uitvoeringssom
+    const monthlyDataMetSK = monthlyData.map(m => {
+      const ratio = totaalUitvoering > 0 ? m.inschrijf / totaalUitvoering : 1 / months.length;
+      return {
+        ...m,
+        inschrijf: m.inschrijf + skInschrijf * ratio,
+        kosten:    m.kosten    + skKosten    * ratio,
+      };
+    });
+
     let cumIns = 0, cumKst = 0;
     const cumCats = Array(13).fill(0);
-    const cashflowData = monthlyData.map(m => {
+    const cashflowData = monthlyDataMetSK.map(m => {
       cumIns += m.inschrijf;
       cumKst += m.kosten;
       m.cats.forEach((c, i) => { cumCats[i] += c; });
@@ -140,7 +155,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
     });
 
     return { months, cashflowData, totals: { totalIns: cumIns, totalKst: cumKst } };
-  }, [posts, tasks, koppelingen]);
+  }, [posts, tasks, koppelingen, staartkosten]);
 
   const hasData = cashflowData.length > 0;
 
@@ -168,20 +183,20 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", maxWidth: W }}>
         <defs>
           <linearGradient id="insGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#1976d2" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#1976d2" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="#1565c0" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#1565c0" stopOpacity="0.02" />
           </linearGradient>
           <linearGradient id="kstGrad" x1="0" y1="0" x2="0" y2="1">
-            <stop offset="0%" stopColor="#7b1fa2" stopOpacity="0.3" />
-            <stop offset="100%" stopColor="#7b1fa2" stopOpacity="0.02" />
+            <stop offset="0%" stopColor="#6a1b9a" stopOpacity="0.3" />
+            <stop offset="100%" stopColor="#6a1b9a" stopOpacity="0.02" />
           </linearGradient>
         </defs>
 
         {/* Grid */}
         {yTicks.map((v, i) => (
           <g key={i}>
-            <line x1={pad.l} y1={py(v)} x2={W - pad.r} y2={py(v)} stroke="#1e4976" strokeWidth={0.5} strokeDasharray={i > 0 ? "4,4" : ""} />
-            <text x={pad.l - 6} y={py(v) + 4} textAnchor="end" fontSize={9} fill="#37474f">{euroK(v)}</text>
+            <line x1={pad.l} y1={py(v)} x2={W - pad.r} y2={py(v)} stroke="#b0cce8" strokeWidth={0.5} strokeDasharray={i > 0 ? "4,4" : ""} />
+            <text x={pad.l - 6} y={py(v) + 4} textAnchor="end" fontSize={9} fill="#8aabca">{euroK(v)}</text>
           </g>
         ))}
 
@@ -189,26 +204,26 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
         <path d={insArea} fill="url(#insGrad)" />
 
         {/* Lines */}
-        <path d={insPath} fill="none" stroke="#1976d2" strokeWidth={2.5} strokeLinejoin="round" />
-        <path d={kstPath} fill="none" stroke="#7b1fa2" strokeWidth={2} strokeLinejoin="round" strokeDasharray="6,3" />
+        <path d={insPath} fill="none" stroke="#1565c0" strokeWidth={2.5} strokeLinejoin="round" />
+        <path d={kstPath} fill="none" stroke="#6a1b9a" strokeWidth={2} strokeLinejoin="round" strokeDasharray="6,3" />
 
         {/* X axis labels */}
         {cashflowData.filter((_, i) => i % Math.max(1, Math.floor(n / 8)) === 0 || i === n - 1).map((d, i) => {
           const idx = cashflowData.indexOf(d);
           return (
-            <text key={i} x={px(idx)} y={H - 10} textAnchor="middle" fontSize={9} fill="#546e7a">{d.label}</text>
+            <text key={i} x={px(idx)} y={H - 10} textAnchor="middle" fontSize={9} fill="#6b8caa">{d.label}</text>
           );
         })}
 
         {/* Dots at last point */}
-        <circle cx={px(n - 1)} cy={py(cashflowData[n - 1].cumInschrijf)} r={4} fill="#1976d2" />
-        <circle cx={px(n - 1)} cy={py(cashflowData[n - 1].cumKosten)} r={4} fill="#7b1fa2" />
+        <circle cx={px(n - 1)} cy={py(cashflowData[n - 1].cumInschrijf)} r={4} fill="#1565c0" />
+        <circle cx={px(n - 1)} cy={py(cashflowData[n - 1].cumKosten)} r={4} fill="#6a1b9a" />
 
         {/* Legend */}
-        <line x1={W - 160} y1={18} x2={W - 135} y2={18} stroke="#1976d2" strokeWidth={2.5} />
-        <text x={W - 130} y={22} fontSize={10} fill="#90caf9">Inschrijfsom</text>
-        <line x1={W - 160} y1={34} x2={W - 135} y2={34} stroke="#7b1fa2" strokeWidth={2} strokeDasharray="6,3" />
-        <text x={W - 130} y={38} fontSize={10} fill="#ce93d8">Interne kosten</text>
+        <line x1={W - 160} y1={18} x2={W - 135} y2={18} stroke="#1565c0" strokeWidth={2.5} />
+        <text x={W - 130} y={22} fontSize={10} fill="#1565c0">Inschrijfsom</text>
+        <line x1={W - 160} y1={34} x2={W - 135} y2={34} stroke="#6a1b9a" strokeWidth={2} strokeDasharray="6,3" />
+        <text x={W - 130} y={38} fontSize={10} fill="#7b1fa2">Interne kosten</text>
       </svg>
     );
   };
@@ -242,10 +257,10 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
 
           return (
             <div key={task.id} style={{ marginBottom: 4, display: "flex", alignItems: "center", gap: 10 }}>
-              <div style={{ width: 180, fontSize: 10, color: "#90a4ae", textAlign: "right", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+              <div style={{ width: 180, fontSize: 10, color: "#4a6785", textAlign: "right", flexShrink: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                 {task.name}
               </div>
-              <div style={{ flex: 1, height: 22, background: "#0a1520", borderRadius: 4, position: "relative" }}>
+              <div style={{ flex: 1, height: 22, background: "#e8eef5", borderRadius: 4, position: "relative" }}>
                 <div style={{
                   position: "absolute", left: `${left}%`, width: `${width}%`,
                   height: "100%", background: bg,
@@ -263,7 +278,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
         })}
         <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 8 }}>
           <div style={{ width: 180 }} />
-          <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 9, color: "#37474f" }}>
+          <div style={{ flex: 1, display: "flex", justifyContent: "space-between", fontSize: 9, color: "#8aabca" }}>
             <span>{new Date(minT).toLocaleDateString("nl-NL", { month: "short", year: "numeric" })}</span>
             <span>{new Date((minT + maxT) / 2).toLocaleDateString("nl-NL", { month: "short", year: "numeric" })}</span>
             <span>{new Date(maxT).toLocaleDateString("nl-NL", { month: "short", year: "numeric" })}</span>
@@ -295,7 +310,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
                   ) : null;
                 })}
               </div>
-              <div style={{ fontSize: 8, color: "#37474f", transform: "rotate(-45deg)", transformOrigin: "top right", whiteSpace: "nowrap", marginTop: 4 }}>
+              <div style={{ fontSize: 8, color: "#8aabca", transform: "rotate(-45deg)", transformOrigin: "top right", whiteSpace: "nowrap", marginTop: 4 }}>
                 {d.label}
               </div>
             </div>
@@ -304,7 +319,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
         {/* Legend */}
         <div style={{ display: "flex", flexWrap: "wrap", gap: "6px 14px", marginTop: 24 }}>
           {CAT_LABELS.map((l, i) => (
-            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#78909c" }}>
+            <div key={i} style={{ display: "flex", alignItems: "center", gap: 5, fontSize: 9, color: "#5a7a9a" }}>
               <div style={{ width: 10, height: 10, background: CAT_COLORS[i], borderRadius: 2 }} />
               {l}
             </div>
@@ -342,7 +357,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
   };
 
   const noDataMsg = (
-    <div style={{ padding: 40, textAlign: "center", color: "#37474f", fontSize: 12 }}>
+    <div style={{ padding: 40, textAlign: "center", color: "#8aabca", fontSize: 12 }}>
       <div style={{ fontSize: 32, marginBottom: 12 }}>📊</div>
       {!posts?.length ? "Laad eerst een inschrijfstaat op tab Begroting" :
         !tasks?.length ? "Laad een MS Project export op tab Planning" :
@@ -355,9 +370,9 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <h2 style={{ fontSize: 16, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 4 }}>DASHBOARD</h2>
+          <h2 style={{ fontSize: 16, fontWeight: 900, color: "#1565c0", letterSpacing: 2, marginBottom: 4 }}>DASHBOARD</h2>
           {hasData && (
-            <p style={{ fontSize: 11, color: "#546e7a" }}>
+            <p style={{ fontSize: 11, color: "#6b8caa" }}>
               {cashflowData.length} periodes · {cashflowData[0]?.label} → {cashflowData[cashflowData.length - 1]?.label}
             </p>
           )}
@@ -376,8 +391,8 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
           {/* KPIs */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 10, marginBottom: 20 }}>
             {[
-              { lbl: "TOTALE INSCHRIJFSOM", val: euro(totals.totalIns), c: "#1976d2" },
-              { lbl: "TOTALE INTERNE KOSTEN", val: euro(totals.totalKst), c: "#7b1fa2" },
+              { lbl: "TOTALE INSCHRIJFSOM", val: euro(totals.totalIns), c: "#1565c0" },
+              { lbl: "TOTALE INTERNE KOSTEN", val: euro(totals.totalKst), c: "#6a1b9a" },
               { lbl: "PROJECTDUUR", val: `${cashflowData.length} maanden`, c: "#00897b" },
             ].map((k, i) => (
               <div key={i} style={{
@@ -385,7 +400,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
                 border: `1px solid ${k.c}40`, borderLeft: `3px solid ${k.c}`,
                 borderRadius: 9, padding: "14px 16px",
               }}>
-                <div style={{ fontSize: 8, color: "#546e7a", letterSpacing: 2, marginBottom: 5 }}>{k.lbl}</div>
+                <div style={{ fontSize: 8, color: "#6b8caa", letterSpacing: 2, marginBottom: 5 }}>{k.lbl}</div>
                 <div style={{ fontSize: 18, fontWeight: 900, color: k.c }}>{k.val}</div>
               </div>
             ))}
@@ -395,9 +410,9 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
           <div style={{ display: "flex", gap: 3, borderBottom: "1px solid #1e4976", marginBottom: 16 }}>
             {[["scurve", "S-CURVE"], ["gantt", "GANTT + KOSTEN"], ["kostensoorten", "KOSTEN PER PERIODE"], ["tabel", "CASHFLOW TABEL"]].map(([id, lbl]) => (
               <button key={id} onClick={() => setActiveView(id)} style={{
-                background: activeView === id ? "rgba(25,118,210,.15)" : "transparent",
-                border: "none", borderBottom: `2px solid ${activeView === id ? "#1976d2" : "transparent"}`,
-                color: activeView === id ? "#90caf9" : "#37474f",
+                background: activeView === id ? "#cce0f5" : "transparent",
+                border: "none", borderBottom: `2px solid ${activeView === id ? "#1565c0" : "transparent"}`,
+                color: activeView === id ? "#1565c0" : "#8aabca",
                 padding: "7px 14px", cursor: "pointer", fontSize: 10,
                 fontWeight: 700, letterSpacing: 1, fontFamily: "inherit", transition: "all .15s",
               }}>{lbl}</button>
@@ -406,16 +421,16 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
 
           {/* S-curve */}
           {activeView === "scurve" && (
-            <div style={{ background: "#0a1520", borderRadius: 10, padding: 20, border: "1px solid #1e4976" }}>
-              <div style={{ fontSize: 11, color: "#546e7a", marginBottom: 14, letterSpacing: 1 }}>CUMULATIEVE INSCHRIJFSOM VS. INTERNE KOSTEN</div>
+            <div style={{ background: "#e8eef5", borderRadius: 10, padding: 20, border: "1px solid #1e4976" }}>
+              <div style={{ fontSize: 11, color: "#6b8caa", marginBottom: 14, letterSpacing: 1 }}>CUMULATIEVE INSCHRIJFSOM VS. INTERNE KOSTEN</div>
               <SCurve />
             </div>
           )}
 
           {/* Gantt */}
           {activeView === "gantt" && (
-            <div style={{ background: "#0a1520", borderRadius: 10, padding: 20, border: "1px solid #1e4976" }}>
-              <div style={{ fontSize: 11, color: "#546e7a", marginBottom: 14, letterSpacing: 1 }}>
+            <div style={{ background: "#e8eef5", borderRadius: 10, padding: 20, border: "1px solid #1e4976" }}>
+              <div style={{ fontSize: 11, color: "#6b8caa", marginBottom: 14, letterSpacing: 1 }}>
                 GANTT — BALKBREEDTE = LOOPTIJD · KLEURINTENSITEIT = KOSTENNIVEAU
               </div>
               <GanttChart />
@@ -424,8 +439,8 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
 
           {/* Kostensoorten per maand */}
           {activeView === "kostensoorten" && (
-            <div style={{ background: "#0a1520", borderRadius: 10, padding: 20, border: "1px solid #1e4976" }}>
-              <div style={{ fontSize: 11, color: "#546e7a", marginBottom: 14, letterSpacing: 1 }}>INTERNE KOSTEN PER KOSTENSOORT PER MAAND</div>
+            <div style={{ background: "#e8eef5", borderRadius: 10, padding: 20, border: "1px solid #1e4976" }}>
+              <div style={{ fontSize: 11, color: "#6b8caa", marginBottom: 14, letterSpacing: 1 }}>INTERNE KOSTEN PER KOSTENSOORT PER MAAND</div>
               <KostenBar />
             </div>
           )}
@@ -435,29 +450,29 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
             <div style={{ overflowX: "auto" }}>
               <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 11 }}>
                 <thead>
-                  <tr style={{ background: "#0d1520" }}>
+                  <tr style={{ background: "#e8eef5" }}>
                     {["Periode", "Inschrijfsom", "Int. kosten", "Marge", "Cum. inschr.", "Cum. kosten"].map(h => (
-                      <th key={h} style={{ padding: "7px 10px", color: "#37474f", fontWeight: 700, textAlign: "right", borderBottom: "1px solid #1e4976", whiteSpace: "nowrap" }}>{h}</th>
+                      <th key={h} style={{ padding: "7px 10px", color: "#8aabca", fontWeight: 700, textAlign: "right", borderBottom: "1px solid #1e4976", whiteSpace: "nowrap" }}>{h}</th>
                     ))}
                   </tr>
                 </thead>
                 <tbody>
                   {cashflowData.map((d, i) => (
-                    <tr key={i} style={{ background: i % 2 ? "rgba(255,255,255,.02)" : "transparent", borderBottom: "1px solid #0d1520" }}>
-                      <td style={{ padding: "5px 10px", color: "#90a4ae", fontWeight: 700 }}>{d.label}</td>
-                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#90caf9" }}>{euro(d.inschrijf)}</td>
-                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#ce93d8" }}>{euro(d.kosten)}</td>
-                      <td style={{ padding: "5px 10px", textAlign: "right", color: d.inschrijf - d.kosten >= 0 ? "#4caf50" : "#ef5350", fontWeight: 700 }}>{euro(d.inschrijf - d.kosten)}</td>
-                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#546e7a" }}>{euro(d.cumInschrijf)}</td>
-                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#546e7a" }}>{euro(d.cumKosten)}</td>
+                    <tr key={i} style={{ background: i % 2 ? "#f8fafc" : "transparent", borderBottom: "1px solid #0d1520" }}>
+                      <td style={{ padding: "5px 10px", color: "#4a6785", fontWeight: 700 }}>{d.label}</td>
+                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#1565c0" }}>{euro(d.inschrijf)}</td>
+                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#7b1fa2" }}>{euro(d.kosten)}</td>
+                      <td style={{ padding: "5px 10px", textAlign: "right", color: d.inschrijf - d.kosten >= 0 ? "#1b5e20" : "#b71c1c", fontWeight: 700 }}>{euro(d.inschrijf - d.kosten)}</td>
+                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#6b8caa" }}>{euro(d.cumInschrijf)}</td>
+                      <td style={{ padding: "5px 10px", textAlign: "right", color: "#6b8caa" }}>{euro(d.cumKosten)}</td>
                     </tr>
                   ))}
                   {/* Totaal */}
-                  <tr style={{ background: "rgba(25,118,210,.12)", borderTop: "2px solid #1976d2" }}>
-                    <td style={{ padding: "8px 10px", fontWeight: 900, color: "#90caf9" }}>TOTAAL</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 900, color: "#90caf9" }}>{euro(totals.totalIns)}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 900, color: "#ce93d8" }}>{euro(totals.totalKst)}</td>
-                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 900, color: totals.totalIns - totals.totalKst >= 0 ? "#4caf50" : "#ef5350" }}>{euro(totals.totalIns - totals.totalKst)}</td>
+                  <tr style={{ background: "#d6e6f8", borderTop: "2px solid #1976d2" }}>
+                    <td style={{ padding: "8px 10px", fontWeight: 900, color: "#1565c0" }}>TOTAAL</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 900, color: "#1565c0" }}>{euro(totals.totalIns)}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 900, color: "#7b1fa2" }}>{euro(totals.totalKst)}</td>
+                    <td style={{ padding: "8px 10px", textAlign: "right", fontWeight: 900, color: totals.totalIns - totals.totalKst >= 0 ? "#1b5e20" : "#b71c1c" }}>{euro(totals.totalIns - totals.totalKst)}</td>
                     <td /><td />
                   </tr>
                 </tbody>
