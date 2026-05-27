@@ -54,11 +54,10 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       return { months: [], cashflowData: [], totals: {} };
     }
 
-    // Cost per hoofdstuk (inschrijf + intern)
+    // Budget per hoofdstuk
     const inschrijfPerHoofdstuk = {};
     const kostenPerHoofdstuk = {};
     const catsPerHoofdstuk = {};
-
     posts.forEach(p => {
       const ins = p.hoeveelheid * p.inschrijfprijs;
       const kst = p.hoeveelheid * p.kostprijs;
@@ -68,46 +67,69 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       p.cats.forEach((c, i) => { catsPerHoofdstuk[p.hoofdstuk][i] += p.hoeveelheid * c; });
     });
 
-    // Determine project time range
+    // Per hoofdstuk: bereken het totale gewogen "aandeel" van alle gekoppelde taken
+    // Aandeel = percentage-koppeling × taakduur (dagen)
+    // Dit voorkomt dat hetzelfde budget meerdere keren wordt meegeteld.
+    const hoofdstukTotalWeight = {};  // { hoofdstuk: totale gewogen dagen }
+    tasks.forEach(task => {
+      const kops = koppelingen[task.id];
+      if (!kops?.length || !task.start || !task.finish) return;
+      const taskDays = Math.max(1, (task.finish - task.start) / 86400000 + 1);
+      kops.forEach(kop => {
+        const h = kop.hoofdstuk;
+        hoofdstukTotalWeight[h] = (hoofdstukTotalWeight[h] || 0) + (kop.percentage / 100) * taskDays;
+      });
+    });
+
+    // Per taak per koppeling: bereken het AANDEEL van het hoofdstukbudget dat aan deze taak toekomt
+    // aandeel = (pct × taakduur) / totalWeight[hoofdstuk]
+    // Dit is het budget dat over de looptijd van deze taak lineair wordt verdeeld.
+    const taskBudget = {};  // { taskId: { hoofdstuk: { inschrijf, kosten, cats } } }
+    tasks.forEach(task => {
+      const kops = koppelingen[task.id];
+      if (!kops?.length || !task.start || !task.finish) return;
+      const taskDays = Math.max(1, (task.finish - task.start) / 86400000 + 1);
+      taskBudget[task.id] = {};
+      kops.forEach(kop => {
+        const h = kop.hoofdstuk;
+        const weight = (kop.percentage / 100) * taskDays;
+        const totalW = hoofdstukTotalWeight[h] || 1;
+        const share = weight / totalW;
+        taskBudget[task.id][h] = {
+          inschrijf: (inschrijfPerHoofdstuk[h] || 0) * share,
+          kosten:    (kostenPerHoofdstuk[h]    || 0) * share,
+          cats:      (catsPerHoofdstuk[h] || Array(13).fill(0)).map(c => c * share),
+        };
+      });
+    });
+
+    // Tijdsbereik
     const validTasks = tasks.filter(t => koppelingen[t.id]?.length > 0 && t.start && t.finish);
     if (!validTasks.length) return { months: [], cashflowData: [], totals: {} };
-
-    const allStarts = validTasks.map(t => t.start).filter(Boolean);
-    const allEnds = validTasks.map(t => t.finish).filter(Boolean);
-    const projectStart = new Date(Math.min(...allStarts.map(d => d.getTime())));
-    const projectEnd = new Date(Math.max(...allEnds.map(d => d.getTime())));
-
+    const projectStart = new Date(Math.min(...validTasks.map(t => t.start.getTime())));
+    const projectEnd   = new Date(Math.max(...validTasks.map(t => t.finish.getTime())));
     const months = monthsBetween(projectStart, projectEnd);
 
-    // Per month: calculate cost distribution
+    // Per maand: verdeel het taakbudget lineair over de looptijd van de taak
     const monthlyData = months.map(month => {
       let inschrijf = 0, kosten = 0;
       const cats = Array(13).fill(0);
-      const taskBreakdown = [];
 
       tasks.forEach(task => {
-        const kops = koppelingen[task.id];
-        if (!kops?.length || !task.start || !task.finish) return;
+        if (!taskBudget[task.id] || !task.start || !task.finish) return;
         const frac = taskOverlapFraction(task, month);
         if (frac === 0) return;
 
-        kops.forEach(kop => {
-          const pct = kop.percentage / 100;
-          const hfdst = kop.hoofdstuk;
-          const ins = (inschrijfPerHoofdstuk[hfdst] || 0) * pct * frac;
-          const kst = (kostenPerHoofdstuk[hfdst] || 0) * pct * frac;
-          inschrijf += ins;
-          kosten += kst;
-          const hCats = catsPerHoofdstuk[hfdst] || Array(13).fill(0);
-          hCats.forEach((c, i) => { cats[i] += c * pct * frac; });
-          if (ins > 0) taskBreakdown.push({ taskName: task.name, hoofdstuk: hfdst, inschrijf: ins, kosten: kst });
+        Object.values(taskBudget[task.id]).forEach(budget => {
+          inschrijf += budget.inschrijf * frac;
+          kosten    += budget.kosten    * frac;
+          budget.cats.forEach((c, i) => { cats[i] += c * frac; });
         });
       });
 
-      return { month, key: monthKey(month), label: monthLabel(month), inschrijf, kosten, cats, taskBreakdown };
+      return { month, key: monthKey(month), label: monthLabel(month), inschrijf, kosten, cats };
     });
 
-    // Cumulative
     let cumIns = 0, cumKst = 0;
     const cumCats = Array(13).fill(0);
     const cashflowData = monthlyData.map(m => {
@@ -117,11 +139,7 @@ export default function PageDashboard({ posts, tasks, koppelingen, staartkosten,
       return { ...m, cumInschrijf: cumIns, cumKosten: cumKst, cumCats: [...cumCats] };
     });
 
-    // Totals
-    const totalIns = cumIns;
-    const totalKst = cumKst;
-
-    return { months, cashflowData, totals: { totalIns, totalKst } };
+    return { months, cashflowData, totals: { totalIns: cumIns, totalKst: cumKst } };
   }, [posts, tasks, koppelingen]);
 
   const hasData = cashflowData.length > 0;
