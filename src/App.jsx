@@ -1,7 +1,8 @@
-import { useState, useCallback, useMemo, useRef } from "react";
+import { useState, useCallback, useMemo, useRef, useEffect } from "react";
 import * as XLSX from "xlsx";
 import PagePlanning from "./PagePlanning.jsx";
 import PageDashboard from "./PageDashboard.jsx";
+import { supabase } from "./supabase.js";
 
 const TARIEF_RAW = [["202010","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Aanbrengen en verwijderen gronddepot.","st",7746.17,31513.11,0,0,8646.44,22866.67,0,0,0,0,0,0,0,0,0],["202101","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Transporteren materialen uit Logistieke Depot","uur",129.53,90,0,0,0,0,0,0,90,0,0,0,0,0,0],["202210","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Inrichten en opruimen werkterrein.","st",21645.54,26447,0,26447,0,0,0,0,0,0,0,0,0,0,0],["202220","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Toepassen beveiliging materiaaldepot.","st*wk",286.76,112.66,0,112.66,0,0,0,0,0,0,0,0,0,0,0],["202230","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Toepassen beveiliging sleuf.","st*wk",286.76,170.13,0,170.13,0,0,0,0,0,0,0,0,0,0,0],["202240","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Toepassen tijdelijke afrastering bouwhekken.","m",9.26,11.87,0,0.55,11.32,0,0,0,0,0,0,0,0,0,0],["202330","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Nul- en eindopname eenmalige kosten","keer",2573.5,1280,0,0,0,0,0,1280,0,0,0,0,0,0,0],["202340","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Nul- en eindopname trace.","km",807.45,145.56,0,0,0,0,0,145.56,0,0,0,0,0,0,0],["202410","VOORBEREIDENDE WERKZAAMHEDEN","Tijdelijke voorzieningen","Toepassen boombescherming.","st",70.22,26.47,0,0,2.94,0,0,0,0,0,23.53,0,0,0,0],["207010","VOORBEREIDENDE WERKZAAMHEDEN","Straatmeubilair","Opnemen en terugplaatsen verkeersbordpaal.","st",125.97,117.2,0,0,117.2,0,0,0,0,0,0,0,0,0,0],["207040","VOORBEREIDENDE WERKZAAMHEDEN","Straatmeubilair","Opnemen en terugplaatsen lichtmasten.","st",746.72,331.36,0,0,331.36,0,0,0,0,0,0,0,0,0,0],["210010","VERHARDINGEN","Elementenverhardingen","Opnemen en aanbrengen betonstraatstenen.","m2",28.37,30.28,0,0,30.28,0,0,0,0,0,0,0,0,0,0],["210020","VERHARDINGEN","Elementenverhardingen","Opnemen en aanbrengen straatbakstenen.","m2",34.92,21.05,0,0,21.05,0,0,0,0,0,0,0,0,0,0],["210040","VERHARDINGEN","Elementenverhardingen","Opnemen en aanbrengen betontegels.","m2",23.47,21.77,0,0,21.77,0,0,0,0,0,0,0,0,0,0],["210060","VERHARDINGEN","Elementenverhardingen","Opnemen en aanbrengen bedrijfsvloerplaten.","m2",17.91,7.1,0,0,7.1,0,0,0,0,0,0,0,0,0,0],["210210","VERHARDINGEN","Elementenverhardingen","Opnemen en aanbrengen opsluitbanden zand.","m",23.93,26.05,0,0,26.05,0,0,0,0,0,0,0,0,0,0],["210230","VERHARDINGEN","Elementenverhardingen","Opnemen en aanbrengen trottoirbanden zand.","m",31.12,38.01,0,0,38.01,0,0,0,0,0,0,0,0,0,0],["213010","VERHARDINGEN","Asfaltverhardingen","Zagen asfaltverharding.","m",7.68,6.35,0,0,6.35,0,0,0,0,0,0,0,0,0,0],["213020","VERHARDINGEN","Asfaltverhardingen","Opbreken asfaltverharding.","m2",138.66,14.74,0,0,14.74,0,0,0,0,0,0,0,0,0,0],["220070","GRONDWERK SLEUVEN","Openbare grond","Realiseren sleuf MS (hinder).","m",13.97,5.98,0,0,0,0,0,5.98,0,0,0,0,0,0,0],["220080","GRONDWERK SLEUVEN","Openbare grond","Realiseren sleuf MS (veel hinder).","m",29,10.06,0,0,0,0,0,10.06,0,0,0,0,0,0,0],["222040","GRONDWERK SLEUVEN","Bredere sleuf","Extra breedte sleuf 50cm hinder.","m",5.44,11.34,0,0,0,0,0,11.34,0,0,0,0,0,0,0],["222060","GRONDWERK SLEUVEN","Bredere sleuf","Extra breedte sleuf 50cm veel hinder.","m",12.52,17.18,0,0,0,0,0,17.18,0,0,0,0,0,0,0],["223010","GRONDWERK SLEUVEN","Overdiepte","Grotere gronddekking (per 10cm).","m",0.33,1.57,0,0,0,0,0,1.57,0,0,0,0,0,0,0],["226040","GRONDWERK SLEUVEN","Grondverbetering","Aanvulzand zandbed in sleuf.","m3",34.17,27.78,0,0,0,0,0,27.78,0,0,0,0,0,0,0],["227010","GRONDWERK SLEUVEN","Grond vervoeren","Grond vervoeren naar/van gronddepot.","m3",14.95,6.98,0,0,0,0,0,6.98,0,0,0,0,0,0,0],["261010","GROENVOORZIENINGEN","Grondwerk","Frezen bermen/werkstrook.","are",4.94,0,0,0,0,0,0,0,0,0,0,0,0,0,0],["262010","GROENVOORZIENINGEN","Inzaaien","Inzaaien van bermen/werkstroken.","are",9.44,0,0,0,0,0,0,0,0,0,0,0,0,0,0],["301010","KRUISINGEN","Mantelbuizen","Aanbrengen mantelbuizen in sleuf.","m",4.43,8.47,0,0,0,0,0,0,8.47,0,0,0,0,0,0],["302010","KRUISINGEN","Persingen","Aanbrengen perslocatie.","st",2126.33,175,0,0,0,0,0,0,0,0,0,0,175,0,0],["302040","KRUISINGEN","Persingen","Boring stalen buis DN250.","m",165.78,120,0,0,0,0,0,0,0,0,0,0,120,0,0],["304010","KRUISINGEN","HDD-boringen","Boorlocatie hdd L<101m.","st",1743.65,343.47,0,0,0,20.38,0,150.36,0,0,0,0,172.73,0,0],["304020","KRUISINGEN","HDD-boringen","Boorlocatie hdd L=101-250m.","st",28530.16,647.68,0,0,0,38.42,0,283.54,0,0,0,0,325.71,0,0],["304120","KRUISINGEN","HDD-boringen","Hdd-boring 1x HDPE 160mm.","m",96.23,21.35,0,0,0,0,0,0,0,0,0,0,21.35,0,0],["304150","KRUISINGEN","HDD-boringen","Hdd-boring 3x HDPE 110mm.","m",99.74,148.95,0,0,0,0,0,0,0,0,0,0,148.95,0,0],["304170","KRUISINGEN","HDD-boringen","Hdd-boring 6x HDPE 110mm.","m",112.04,191.71,0,0,0,0,0,0,0,0,0,0,191.71,0,0],["304190","KRUISINGEN","HDD-boringen","Hdd-boring 9x HDPE 110mm.","m",129.67,38.12,0,0,0,0,0,0,0,0,0,0,38.12,0,0],["304320","KRUISINGEN","HDD-boringen","Meerprijs HDPE 160mm.","m",24.2,24.2,0,0,0,0,0,0,0,0,0,0,24.2,0,0],["309040","KRUISINGEN","Mantelbuizen PVC/PE","Leveren HDPE 110mm SDR11.","m",6.68,7.4,0,0,0,0,0,0,0,0,0,0,0,0,7.4],["309060","KRUISINGEN","Mantelbuizen PVC/PE","Leveren HDPE 160mm SDR11.","m",14.19,3.83,0,0,0,0,0,0,0,0,0,0,0,0,3.83],["340010","KRUISINGEN","Bemaling","Plaatsen en verwijderen peilbuis.","st",229.41,303.75,0,0,0,0,0,0,0,0,0,303.75,0,0,0],["345010","KRUISINGEN","Open bemaling","Aanbrengen en verwijderen open bemaling.","m",4.62,1.27,0,0,0,0,0,0,0,0,0,1.27,0,0,0],["345020","KRUISINGEN","Open bemaling","Instandhouden open bemaling.","dag",118.08,302.16,0,0,0,0,0,0,0,265.39,0,36.77,0,0,0],["350010","KRUISINGEN","Bronbemaling","Bronbemaling puntlocatie.","keer",1233.07,516.31,0,0,0,0,0,0,0,503.31,0,13,0,0,0],["350030","KRUISINGEN","Bronbemaling","Bronbemaling langs sleuf.","m",19.44,4.62,0,0,0,0,0,0,0,4.54,0,0.08,0,0,0],["350040","KRUISINGEN","Bronbemaling","Instandhouden bronbemalingspompen.","st*wk",539.1,274.58,0,0,0,0,0,0,0,0,0,274.58,0,0,0],["400020","KABEL/LEIDINGWERK ELEKTRA","Leggen kabels","Aanbrengen MS kabel 1x3x240mm2.","m",3.94,1.14,0,0,0,0,0,0,1.14,0,0,0,0,0,0],["400040","KABEL/LEIDINGWERK ELEKTRA","Leggen kabels","Aanbrengen MS kabel 3x1x240mm2 gebundeld.","m",11.67,1.06,0,0,0,0,0,0,1.06,0,0,0,0,0,0],["400050","KABEL/LEIDINGWERK ELEKTRA","Leggen kabels","Aanbrengen MS kabel 3x1x630mm2 gebundeld.","m",11.89,10.51,0,0,0,0,0,0,10.51,0,0,0,0,0,0],["400070","KABEL/LEIDINGWERK ELEKTRA","Leggen kabels","Aanbrengen kabel in mantelbuis.","m",4.86,2.08,0,0,0,0,0,0,2.08,0,0,0,0,0,0],["410040","MONTAGEWERKZAAMHEDEN ELEKTRA","Moffen","Monteren MS verbindingsmof 3-fase 1x3x240mm2.","st",779.99,42.67,0,0,0,0,0,0,42.67,0,0,0,0,0,0],["410050","MONTAGEWERKZAAMHEDEN ELEKTRA","Moffen","Monteren MS overgangmof.","st",820.14,14.99,0,0,0,0,0,0,14.99,0,0,0,0,0,0],["410060","MONTAGEWERKZAAMHEDEN ELEKTRA","Moffen","Monteren MS verbindingsmof 1-fase 3x1x630mm2.","set",1043.83,51.2,0,0,0,0,0,0,51.2,0,0,0,0,0,0],["416010","MONTAGEWERKZAAMHEDEN ELEKTRA","Verwijderen","Kabel verwijderen.","m",4.83,0.72,0,0,0,0,0,0,0.72,0,0,0,0,0,0],["418020","MONTAGEWERKZAAMHEDEN ELEKTRA","Invoeren","Invoeren 1-fase MS kabels in stations.","set",527.54,68.57,0,0,0,0,0,0,68.57,0,0,0,0,0,0],["418030","MONTAGEWERKZAAMHEDEN ELEKTRA","Invoeren","Gat boren fundering voor kabels.","st",68.36,13.39,0,0,0,0,0,0,13.39,0,0,0,0,0,0],["420010","AARDING CS - OS (op het veld)","Aarding","Aanbrengen aardelektrode 25mm2 Cu vertind.","m",123.63,1.93,0,0,0,0,0,0,1.93,0,0,0,0,0,0],["420020","AARDING CS - OS (op het veld)","Aarding","Aanbrengen aansluitdraad Cu 25mm2.","m",41.75,3.96,0,0,0,0,0,0,3.96,0,0,0,0,0,0],["441010","KABEL/LEIDINGWERK INFORMATIE DISTRIBUTIE MS","Glasvezel","Aanbrengen HDPE glasvezelbuis 40mm in sleuf.","m",1.74,0,0,0,0,0,0,0,0,0,0,0,0,0,0],["500020","STATIONS","Civiel","Aanbrengen betontegels rondom stations.","m2",31.48,8.45,0,0,8.45,0,0,0,0,0,0,0,0,0,0],["500030","STATIONS","Civiel","Aanbrengen grasbetontegels nabij stations.","m2",25.39,5.82,0,0,5.82,0,0,0,0,0,0,0,0,0,0],["500040","STATIONS","Civiel","Coordinatie plaatsen station.","st",279.88,0,0,0,0,0,0,0,0,0,0,0,0,0,0],["800010","BIJKOMENDE WERKZAAMHEDEN","Bijkomende werkzaamheden","Digitaal uitzetten trace (GPS).","m",0.81,0.37,0.37,0,0,0,0,0,0,0,0,0,0,0,0],["810010","DIRECTIEBEHOEFTEN","Directiebehoeften","Gebruik directieverblijf.","week",1318.28,1737.68,0,0,1737.68,0,0,0,0,0,0,0,0,0,0],["820010","OPLEVERING EN REVISIE","Oplevering","Uitvoeren eindmeting/fingerprintmeting.","circuit",4588.22,1733.33,0,0,0,0,0,0,1733.33,0,0,0,0,0,0],["820040","OPLEVERING EN REVISIE","Oplevering","Opstellen en aanleveren opleverdossier.","st",1119.53,0,0,0,0,0,0,0,0,0,0,0,0,0,0],["871010","TER BESCHIKKING STELLEN","T.b.s. Materieel","T.b.s. mobiele hydraulische graafmachine.","uur",94.63,0,0,0,0,0,0,0,0,0,0,0,0,0,0],["871060","TER BESCHIKKING STELLEN","T.b.s. Materieel","T.b.s. vrachtauto.","uur",78.56,0,0,0,0,0,0,0,0,0,0,0,0,0,0]];
 
@@ -37,19 +38,21 @@ function parseInschrijfstaat(buf) {
     if (!v) return;
     const isStaart = v.startsWith("9") && v.length === 6;
     if (!isStaart) {
-      // col9 = pre-calculated totaal (includes indexation, correct per post)
-      // col4 = hoeveelheid, col7 = prijs per eenheid
+      // col9 = pre-calculated totaal per post (correct, includes any indexation)
+      // Only use col9 — if it's 0 the post is genuinely zero in this inschrijfstaat
       const col9 = parseFloat(row[9]) || 0;
-      const h = parseFloat(row[4]) || 0;
-      const p = parseFloat(row[7]) || 0;
-      // Use col9 when available — it reflects the correct (possibly indexed) total.
-      // Derive inschrijfprijs: if col9>0 use col9/h, else use col7 directly.
-      // Only include the post when it has an actual amount.
-      const totaal = col9 !== 0 ? col9 : (h > 0 ? h * p : 0);
-      const inschrijfprijs = totaal > 0 && h > 0 ? totaal / h : (p || 0);
-      if (totaal > 0) posts.push({postnr:v, hoeveelheid:h||1, inschrijfprijs});
+      const h    = parseFloat(row[4]) || 0;
+      const p    = parseFloat(row[7]) || 0;
+      if (col9 > 0) {
+        const inschrijfprijs = h > 0 ? col9 / h : p;
+        posts.push({postnr:v, hoeveelheid:h||1, inschrijfprijs});
+      }
     } else {
-      sks.push({postnr:v, omschrijving:row[2]?String(row[2]).split(".")[0].trim():v, pct:parseFloat(row[7])||0, interneKosten:0});
+      // Use col9 as the pre-calculated staartkosten bedrag (cumulative base, correct)
+      // Fall back to pct×subtotaal only when col9 is missing
+      const col9bedrag = parseFloat(row[9]) || 0;
+      const pct = parseFloat(row[7]) || 0;
+      sks.push({postnr:v, omschrijving:row[2]?String(row[2]).split(".")[0].trim():v, pct, col9bedrag, interneKosten:0});
     }
   });
   const enriched=posts.map(p=>{
@@ -73,7 +76,7 @@ function Badge({n,color}){
 }
 
 export default function App() {
-  const [page,setPage]=useState("begroting");
+  const [page,setPage]=useState("projecten");
   const [posts,setPosts]=useState([]);
   const [staartkosten,setStaartkosten]=useState([]);
   const [projectName,setProjectName]=useState("");
@@ -82,19 +85,116 @@ export default function App() {
   const [expandedChaps,setExpandedChaps]=useState({});
   const fileRef=useRef();
 
+  // ── Project management state ──────────────────────────────────────────────
+  const [projecten,setProjecten]=useState([]);
+  const [huidigProjectId,setHuidigProjectId]=useState(null);
+  const [loadingProjecten,setLoadingProjecten]=useState(true);
+  const [saving,setSaving]=useState(false);
+  const [saveMsg,setSaveMsg]=useState("");
+
+  // ── Supabase: laad projectenlijst ─────────────────────────────────────────
+  useEffect(()=>{
+    laadProjecten();
+  },[]);
+
+  const laadProjecten = async()=>{
+    setLoadingProjecten(true);
+    const{data,error}=await supabase
+      .from("wb_projecten")
+      .select("id,naam,projectnummer,opdrachtgever,bijgewerkt_op")
+      .order("bijgewerkt_op",{ascending:false});
+    if(!error && data) setProjecten(data);
+    setLoadingProjecten(false);
+  };
+
+  const openProject = async(id)=>{
+    const{data,error}=await supabase
+      .from("wb_projecten")
+      .select("*")
+      .eq("id",id)
+      .single();
+    if(error||!data) return;
+    setHuidigProjectId(data.id);
+    setProjectName(data.naam||"");
+    setPosts(data.posts||[]);
+    setStaartkosten(data.staartkosten||[]);
+    // Restore date objects in tasks (JSON serializes them to strings)
+    const loadedTasks=(data.taken||[]).map(t=>({
+      ...t,
+      start: t.start ? new Date(t.start) : null,
+      finish: t.finish ? new Date(t.finish) : null,
+    }));
+    setTasks(loadedTasks);
+    setKoppelingen(data.koppelingen||{});
+    const chaps={};(data.posts||[]).forEach(p=>{chaps[p.hoofdstuk]=true;});
+    setExpandedChaps(chaps);
+    setPage("begroting");
+  };
+
+  const slaOp = useCallback(async()=>{
+    setSaving(true);
+    setSaveMsg("");
+    const payload={
+      naam: projectName||"Naamloos project",
+      projectnummer: projectName.match(/\d{4}_\d{4}/)?.[0]||null,
+      opdrachtgever: staartkosten.length>0?"Alliander":null,
+      posts, staartkosten, taken:tasks, koppelingen,
+    };
+    let error;
+    if(huidigProjectId){
+      ({error}=await supabase.from("wb_projecten").update(payload).eq("id",huidigProjectId));
+    } else {
+      const{data,error:e}=await supabase.from("wb_projecten").insert(payload).select().single();
+      error=e;
+      if(data) setHuidigProjectId(data.id);
+    }
+    setSaving(false);
+    if(error){ setSaveMsg("❌ "+error.message); }
+    else { setSaveMsg("✓ Opgeslagen"); laadProjecten(); setTimeout(()=>setSaveMsg(""),3000); }
+  },[projectName,posts,staartkosten,tasks,koppelingen,huidigProjectId]);
+
+  const verwijderProject = async(id,naam)=>{
+    if(!confirm(`Project "${naam}" verwijderen?`)) return;
+    await supabase.from("wb_projecten").delete().eq("id",id);
+    if(id===huidigProjectId){ resetProject(); }
+    laadProjecten();
+  };
+
+  const resetProject=()=>{
+    setHuidigProjectId(null);
+    setProjectName("");
+    setPosts([]);
+    setStaartkosten([]);
+    setTasks([]);
+    setKoppelingen({});
+    setExpandedChaps({});
+  };
+
+  // Nieuw project: reset alles en ga naar begroting zonder bestaand ID
+  const nieuwProject=()=>{
+    resetProject();
+    setPage("begroting");
+  };
+
   const handleInschrijfstaat=useCallback(async(file)=>{
     const buf=await file.arrayBuffer();
     const{posts:p,staartkosten:sk}=parseInschrijfstaat(buf);
-    setPosts(p);setStaartkosten(sk);
+    // Altijd huidigProjectId wissen — nieuwe inschrijfstaat = nieuw project
+    setHuidigProjectId(null);
+    setPosts(p);
+    setStaartkosten(sk);
     setProjectName(file.name.replace(/\.xlsx$/i,"").replace(/_/g," ").substring(0,60));
-    const chaps={};p.forEach(x=>{chaps[x.hoofdstuk]=true;});setExpandedChaps(chaps);
+    setTasks([]);
+    setKoppelingen({});
+    const chaps={};p.forEach(x=>{chaps[x.hoofdstuk]=true;});
+    setExpandedChaps(chaps);
     setPage("begroting");
   },[]);
 
   const totals=useMemo(()=>{
     let si=0,sk=0;
     posts.forEach(p=>{si+=p.hoeveelheid*p.inschrijfprijs;sk+=p.hoeveelheid*p.kostprijs;});
-    const skI=staartkosten.reduce((s,x)=>s+x.pct/100*si,0);
+    const skI=staartkosten.reduce((s,x)=>s+(x.col9bedrag||x.pct/100*si),0);
     const skK=staartkosten.reduce((s,x)=>s+(x.interneKosten||0),0);
     const ti=si+skI,tk=sk+skK;
     return{si,sk,ti,tk,m:ti-tk,mp:ti>0?(ti-tk)/ti:0};
@@ -121,7 +221,7 @@ export default function App() {
     });
     rows.push([],["SUBTOTAAL UITVOERING","","","","",totals.si,"",totals.sk,totals.si-totals.sk]);
     rows.push([],["STAARTKOSTEN"]);
-    staartkosten.forEach(sk=>{const b=sk.pct/100*totals.si;rows.push([sk.postnr,sk.omschrijving,"%",sk.pct,"",b,"",sk.interneKosten||0,b-(sk.interneKosten||0)]);});
+    staartkosten.forEach(sk=>{const b=sk.col9bedrag||sk.pct/100*totals.si;rows.push([sk.postnr,sk.omschrijving,"%",sk.pct,"",b,"",sk.interneKosten||0,b-(sk.interneKosten||0)]);});
     rows.push(["TOTAAL","","","","",totals.ti,"",totals.tk,totals.m]);
     const ws=XLSX.utils.aoa_to_sheet(rows);
     ws["!cols"]=[8,12,50,8,6,14,14,14,14,10,...Array(13).fill(12)].map(w=>({wch:w}));
@@ -132,25 +232,86 @@ export default function App() {
   return (
     <div style={{minHeight:"100vh",background:"#0f1923",fontFamily:"'IBM Plex Mono','Courier New',monospace",color:"#e8eaed"}}>
       <header style={{background:"linear-gradient(135deg,#0f1923,#1a2d40,#0f1923)",borderBottom:"2px solid #1e4976",padding:"12px 22px",display:"flex",alignItems:"center",gap:14,position:"sticky",top:0,zIndex:100}}>
-        <div style={{width:32,height:32,background:"linear-gradient(135deg,#1976d2,#0d47a1)",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:"#fff",boxShadow:"0 0 12px rgba(25,118,210,.5)",flexShrink:0}}>W</div>
+        <div onClick={()=>setPage("projecten")} style={{width:32,height:32,background:"linear-gradient(135deg,#1976d2,#0d47a1)",borderRadius:7,display:"flex",alignItems:"center",justifyContent:"center",fontSize:15,fontWeight:900,color:"#fff",boxShadow:"0 0 12px rgba(25,118,210,.5)",flexShrink:0,cursor:"pointer"}}>W</div>
         <div>
           <div style={{fontSize:11,fontWeight:700,letterSpacing:3,color:"#90caf9"}}>A.HAK ELECTRON</div>
           <div style={{fontSize:9,color:"#546e7a",letterSpacing:2}}>WERKBEGROTING + PLANNING</div>
         </div>
         <nav style={{marginLeft:24,display:"flex",gap:2}}>
-          {[["begroting","BEGROTING",posts.length,"#1976d2"],["planning","PLANNING",tasks.length,"#00897b"],["dashboard","DASHBOARD",completeTasks.length||null,"#7b1fa2"]].map(([id,lbl,badge,bc])=>(
+          {[["projecten","PROJECTEN",projecten.length,"#546e7a"],["begroting","BEGROTING",posts.length||null,"#1976d2"],["planning","PLANNING",tasks.length||null,"#00897b"],["dashboard","DASHBOARD",completeTasks.length||null,"#7b1fa2"]].map(([id,lbl,badge,bc])=>(
             <button key={id} onClick={()=>setPage(id)} style={{background:page===id?"rgba(25,118,210,.15)":"transparent",border:"none",borderBottom:`2px solid ${page===id?"#1976d2":"transparent"}`,color:page===id?"#90caf9":"#37474f",padding:"6px 14px",cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:1.5,fontFamily:"inherit",transition:"all .15s",display:"flex",alignItems:"center"}}>
               {lbl}<Badge n={badge} color={bc}/>
             </button>
           ))}
         </nav>
         <div style={{marginLeft:"auto",display:"flex",gap:8,alignItems:"center"}}>
-          {posts.length>0&&<div style={{fontSize:10,color:"#37474f",textAlign:"right"}}><div style={{color:"#546e7a"}}>{projectName.substring(0,30)}</div><div style={{color:"#1976d2",fontWeight:700}}>{euro(totals.ti)}</div></div>}
+          {posts.length>0&&(
+            <div style={{fontSize:10,color:"#37474f",textAlign:"right"}}>
+              <div style={{color:"#546e7a"}}>{projectName.substring(0,28)}</div>
+              <div style={{color:"#1976d2",fontWeight:700}}>{euro(totals.ti)}</div>
+            </div>
+          )}
+          {saveMsg&&<span style={{fontSize:10,color:saveMsg.startsWith("❌")?"#ef5350":"#4caf50",fontWeight:700}}>{saveMsg}</span>}
+          {posts.length>0&&(
+            <button onClick={slaOp} disabled={saving} style={{background:saving?"#1e4976":"rgba(0,137,123,.9)",border:"none",color:"#fff",padding:"7px 14px",borderRadius:6,cursor:saving?"not-allowed":"pointer",fontSize:10,fontWeight:700,letterSpacing:1,fontFamily:"inherit"}}>
+              {saving?"…":"💾 OPSLAAN"}
+            </button>
+          )}
           <button onClick={()=>fileRef.current.click()} style={{background:"linear-gradient(135deg,#1976d2,#0d47a1)",border:"none",color:"#fff",padding:"7px 14px",borderRadius:6,cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:1,fontFamily:"inherit"}}>+ INSCHRIJFSTAAT</button>
         </div>
         <input ref={fileRef} type="file" accept=".xlsx" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]) handleInschrijfstaat(e.target.files[0]); }}/>
       </header>
 
+      {/* ── PROJECTEN OVERZICHT ── */}
+      {page==="projecten"&&(
+        <div style={{maxWidth:860,margin:"40px auto",padding:"0 20px"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:24}}>
+            <div>
+              <h2 style={{fontSize:18,fontWeight:900,color:"#90caf9",letterSpacing:2,marginBottom:4}}>PROJECTEN</h2>
+              <p style={{fontSize:11,color:"#546e7a"}}>{projecten.length} projecten opgeslagen · Klik om te openen</p>
+            </div>
+            <div style={{display:"flex",gap:8,alignItems:"center"}}>
+              {huidigProjectId&&(
+                <button onClick={()=>setPage("begroting")} style={{background:"transparent",border:"1px solid #1976d2",color:"#90caf9",padding:"9px 16px",borderRadius:7,cursor:"pointer",fontSize:11,fontWeight:700,letterSpacing:1,fontFamily:"inherit"}}>
+                  ← TERUG NAAR HUIDIG
+                </button>
+              )}
+              <button onClick={nieuwProject} style={{background:"linear-gradient(135deg,#1976d2,#0d47a1)",border:"none",color:"#fff",padding:"10px 20px",borderRadius:7,cursor:"pointer",fontSize:11,fontWeight:700,letterSpacing:1,fontFamily:"inherit"}}>
+                + NIEUW PROJECT
+              </button>
+            </div>
+          </div>
+
+          {loadingProjecten?(
+            <div style={{textAlign:"center",padding:40,color:"#37474f",fontSize:12}}>Laden…</div>
+          ):projecten.length===0?(
+            <div style={{textAlign:"center",padding:60,border:"2px dashed #1e4976",borderRadius:12}}>
+              <div style={{fontSize:36,marginBottom:12}}>📂</div>
+              <div style={{fontSize:13,color:"#546e7a",marginBottom:8}}>Nog geen projecten opgeslagen</div>
+              <div style={{fontSize:11,color:"#37474f"}}>Laad een inschrijfstaat en klik Opslaan</div>
+            </div>
+          ):(
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {projecten.map(p=>(
+                <div key={p.id} style={{display:"flex",alignItems:"center",gap:14,padding:"14px 18px",background:"linear-gradient(135deg,#0d1f2d,#132436)",border:`1px solid ${p.id===huidigProjectId?"#1976d2":"#1e4976"}`,borderLeft:`3px solid ${p.id===huidigProjectId?"#1976d2":"#1e4976"}`,borderRadius:9,cursor:"pointer"}} onClick={()=>openProject(p.id)}>
+                  <div style={{flex:1}}>
+                    <div style={{fontSize:13,fontWeight:700,color:p.id===huidigProjectId?"#90caf9":"#cfd8dc",marginBottom:3}}>{p.naam}</div>
+                    <div style={{fontSize:10,color:"#37474f"}}>
+                      {p.projectnummer&&<span style={{marginRight:12,color:"#546e7a"}}>{p.projectnummer}</span>}
+                      {p.opdrachtgever&&<span style={{marginRight:12}}>{p.opdrachtgever}</span>}
+                      <span>Bijgewerkt: {new Date(p.bijgewerkt_op).toLocaleDateString("nl-NL",{day:"2-digit",month:"2-digit",year:"numeric",hour:"2-digit",minute:"2-digit"})}</span>
+                    </div>
+                  </div>
+                  {p.id===huidigProjectId&&<span style={{fontSize:10,color:"#1976d2",fontWeight:700}}>OPEN</span>}
+                  <button onClick={e=>{e.stopPropagation();verwijderProject(p.id,p.naam);}} style={{background:"transparent",border:"1px solid #37474f",color:"#546e7a",padding:"4px 10px",borderRadius:5,cursor:"pointer",fontSize:10,fontFamily:"inherit"}}>
+                    🗑
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
       {page==="begroting"&&(posts.length===0?(
         <div style={{maxWidth:520,margin:"80px auto",padding:"0 20px",textAlign:"center"}}>
           <div style={{fontSize:40,marginBottom:14}}>📋</div>
@@ -245,7 +406,7 @@ export default function App() {
                 <thead><tr style={{background:"#0d1520",borderBottom:"2px solid #1e4976"}}>{["Post","Omschrijving","% (inschr.)","Inschrijfsom","Interne kosten","Marge"].map(h=><th key={h} style={{padding:"7px 12px",color:"#37474f",fontWeight:700,textAlign:h.match(/Post|Omschr/)?"left":"right"}}>{h}</th>)}</tr></thead>
                 <tbody>
                   {staartkosten.map((sk,i)=>{
-                    const b=sk.pct/100*totals.si,mar=b-(sk.interneKosten||0);
+                    const b=sk.col9bedrag||sk.pct/100*totals.si,mar=b-(sk.interneKosten||0);
                     return(<tr key={sk.postnr} style={{borderBottom:"1px solid #0d1520",background:i%2?"rgba(255,255,255,.02)":"transparent"}}>
                       <td style={{padding:"7px 12px",color:"#546e7a",fontFamily:"monospace"}}>{sk.postnr}</td>
                       <td style={{padding:"7px 12px",color:"#cfd8dc"}}>{sk.omschrijving}</td>

@@ -100,6 +100,118 @@ const S = {
 // ── Hoofd component ────────────────────────────────────────────────────────────
 export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelingen, posts }) {
 
+  const [uploadError, setUploadError] = useState("");
+
+  // Parse Excel planning file (our own format or MS Project export)
+  const parseExcelPlanning = useCallback(async (file) => {
+    setUploadError("");
+    try {
+      const XLSX = await import("xlsx");
+      const buf = await file.arrayBuffer();
+      const wb = XLSX.read(new Uint8Array(buf), { type: "array", cellDates: true, raw: true });
+
+      // Prefer "App Import" sheet, then "Taakoverzicht", then first sheet
+      const preferred = ["App Import", "Taakoverzicht", "Taakoverzicht (MS Project)"];
+      const sheetName = preferred.find(n => wb.SheetNames.includes(n)) || wb.SheetNames[0];
+      const ws = wb.Sheets[sheetName];
+      const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null });
+
+      // Find header row — look for "taaknaam" or "name"
+      let headerRow = -1, colMap = {};
+      const KW = {
+        name:   ["taaknaam","task name","name","naam"],
+        start:  ["begin","start","startdatum"],
+        finish: ["voltooiing","finish","einde","einddatum","end"],
+        level:  ["overzichtsniveau","outline level","niveau","level","l"],
+        id:     ["id","nr","nummer"],
+      };
+      for (let i = 0; i < Math.min(10, data.length); i++) {
+        const row = (data[i] || []).map(c => c ? String(c).toLowerCase().trim() : "");
+        const nameCol = row.findIndex(c => KW.name.some(k => c === k || c.startsWith(k)));
+        if (nameCol >= 0) {
+          headerRow = i;
+          row.forEach((c, j) => {
+            if (KW.name.some(k => c === k || c.startsWith(k)) && colMap.name === undefined) colMap.name = j;
+            if (KW.start.some(k => c === k || c.startsWith(k)) && colMap.start === undefined) colMap.start = j;
+            if (KW.finish.some(k => c === k || c.startsWith(k)) && colMap.finish === undefined) colMap.finish = j;
+            if (KW.level.some(k => c === k) && colMap.level === undefined) colMap.level = j;
+            if (KW.id.some(k => c === k) && colMap.id === undefined) colMap.id = j;
+          });
+          break;
+        }
+      }
+
+      if (headerRow < 0) {
+        setUploadError("Geen herkende kolomheaders gevonden. Gebruik het tabblad 'App Import' uit het planningsbestand.");
+        return;
+      }
+
+      function parseDate(v) {
+        if (!v) return null;
+        if (v instanceof Date) return isNaN(v) ? null : v;
+        if (typeof v === "number" && v > 40000 && v < 60000)
+          return new Date(Math.round((v - 25569) * 86400000));
+        const s = String(v).trim();
+        let m = s.match(/^(\d{1,2})[-\/.](\d{1,2})[-\/.](\d{4})$/);
+        if (m) return new Date(+m[3], +m[2]-1, +m[1]);
+        m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+        if (m) return new Date(+m[1], +m[2]-1, +m[3]);
+        const d = new Date(s); return isNaN(d) ? null : d;
+      }
+
+      const loaded = [];
+      for (let i = headerRow + 1; i < data.length; i++) {
+        const row = data[i] || [];
+        const rawName = row[colMap.name];
+        if (!rawName) continue;
+        const name = String(rawName).trim();
+        if (!name) continue;
+        const start = parseDate(colMap.start !== undefined ? row[colMap.start] : null);
+        const finish = parseDate(colMap.finish !== undefined ? row[colMap.finish] : null);
+        if (!start || !finish) continue;
+        const levelRaw = colMap.level !== undefined ? row[colMap.level] : null;
+        const level = levelRaw != null ? (parseInt(levelRaw) || 0) : 0;
+        const id = colMap.id !== undefined && row[colMap.id] != null
+          ? String(row[colMap.id]) : String(i);
+        loaded.push({ id, name, start, finish, level, pct: 0 });
+      }
+
+      if (loaded.length === 0) {
+        setUploadError("Geen taken met start- en einddatum gevonden.");
+        return;
+      }
+
+      // Auto-suggest koppelingen
+      const suggested = {};
+      loaded.forEach(task => {
+        const nl = task.name.toLowerCase();
+        const matches = [];
+        if (nl.includes("grond") || nl.includes("sleuf") || nl.includes("ontgrav")) matches.push("GRONDWERK SLEUVEN");
+        if ((nl.includes("kabel") || nl.includes("trek")) && !nl.includes("montage") && !nl.includes("glasvezel")) matches.push("KABEL/LEIDINGWERK ELEKTRA");
+        if (nl.includes("montage") || nl.includes("mof") || nl.includes("eindsluiting")) matches.push("MONTAGEWERKZAAMHEDEN ELEKTRA");
+        if (nl.includes("hdd") || nl.includes("boring") || nl.includes("kruising") || nl.includes("bemaling")) matches.push("KRUISINGEN");
+        if (nl.includes("verharding") || nl.includes("asfalt") || nl.includes("straat") || nl.includes("uitnem")) matches.push("VERHARDINGEN");
+        if (nl.includes("voorber") || nl.includes("inrichten") || nl.includes("vergunnin") || nl.includes("klic")) matches.push("VOORBEREIDENDE WERKZAAMHEDEN");
+        if (nl.includes("groen") || nl.includes("inzaai") || nl.includes("berm")) matches.push("GROENVOORZIENINGEN");
+        if (nl.includes("oplever") || nl.includes("revisie") || nl.includes("eindmet") || nl.includes("ibn") || nl.includes("dossier")) matches.push("OPLEVERING EN REVISIE");
+        if (nl.includes("station")) matches.push("STATIONS");
+        if (nl.includes("verkeersmaatregel") || nl.includes("tvm")) matches.push("VOORBEREIDENDE WERKZAAMHEDEN");
+        if (matches.length > 0) {
+          const pctEach = Math.round(100 / matches.length);
+          suggested[task.id] = matches.map((h, i) => ({
+            hoofdstuk: h,
+            percentage: i === matches.length - 1 ? 100 - pctEach * (matches.length - 1) : pctEach,
+          }));
+        }
+      });
+
+      setTasks(loaded);
+      setKoppelingen(suggested);
+    } catch (err) {
+      setUploadError("Fout bij inlezen: " + err.message);
+    }
+  }, [setTasks, setKoppelingen]);
+
   // Costs per hoofdstuk (for display)
   const kostenPerHoofdstuk = {};
   if (posts) {
@@ -202,44 +314,39 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
   // ── Leeg scherm ─────────────────────────────────────────────────────────────
   if (tasks.length === 0) {
     return (
-      <div style={{ maxWidth: 680, margin: "60px auto", padding: "0 20px", textAlign: "center" }}>
-        <div style={{ fontSize: 40, marginBottom: 16 }}>📅</div>
-        <h2 style={{ fontSize: 18, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 10 }}>
-          UITVOERINGSPLANNING
-        </h2>
-        <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.9, marginBottom: 32 }}>
-          Maak de planning handmatig aan met standaard werkpakketten,<br />
-          of begin met een leeg schema en voeg eigen taken toe.
-        </p>
-        <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
-          <button onClick={initDefault} style={{
-            background: "linear-gradient(135deg,#1976d2,#0d47a1)", border: "none",
-            color: "#fff", padding: "12px 28px", borderRadius: 8, cursor: "pointer",
-            fontSize: 12, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit",
-            boxShadow: "0 2px 14px rgba(25,118,210,.4)",
-          }}>
-            ✦ START MET STANDAARD WERKPAKKETTEN
-          </button>
-          <button onClick={() => addTask(null)} style={{
-            background: "transparent", border: "1px solid #1e4976",
-            color: "#546e7a", padding: "12px 24px", borderRadius: 8, cursor: "pointer",
-            fontSize: 12, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit",
-          }}>
-            + LEEG BEGIN
-          </button>
+      <div style={{ maxWidth: 680, margin: "50px auto", padding: "0 20px" }}>
+        <div style={{ textAlign: "center", marginBottom: 28 }}>
+          <div style={{ fontSize: 38, marginBottom: 12 }}>📅</div>
+          <h2 style={{ fontSize: 17, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 8 }}>UITVOERINGSPLANNING</h2>
+          <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.9 }}>Laad een planningsbestand of maak de planning handmatig aan.</p>
         </div>
-        <div style={{ marginTop: 32, padding: 20, background: "rgba(255,255,255,.02)", borderRadius: 10, border: "1px solid #1e4976", textAlign: "left" }}>
-          <div style={{ fontSize: 10, color: "#546e7a", letterSpacing: 1, marginBottom: 12 }}>STANDAARD WERKPAKKETTEN</div>
-          {DEFAULT_TASKS.map((t, i) => (
-            <div key={i} style={{ display: "flex", gap: 10, marginBottom: 7, fontSize: 11, color: "#78909c", alignItems: "center" }}>
-              <span style={{ color: "#1976d2", minWidth: 16 }}>▸</span>
-              <span style={{ fontWeight: 700, color: "#90a4ae" }}>{t.name}</span>
-              <span style={{ color: "#37474f" }}>→ {CHAP_SHORT[t.defaultHoofdstuk]}</span>
+        <div
+          style={{ border: "2px dashed #1e4976", borderRadius: 12, padding: "24px 20px", marginBottom: 14, background: "rgba(25,118,210,.03)", cursor: "pointer", transition: "all .2s" }}
+          onDragOver={e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#42a5f5"; }}
+          onDragLeave={e => { e.currentTarget.style.borderColor="#1e4976"; }}
+          onDrop={e => { e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#1e4976"; const f=e.dataTransfer.files[0]; if(f) parseExcelPlanning(f); }}
+          onClick={() => document.getElementById("planningUploadInput").click()}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: 14 }}>
+            <span style={{ fontSize: 26 }}>📂</span>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontSize: 13, fontWeight: 700, color: "#90caf9", marginBottom: 3 }}>Excel planningsbestand uploaden</div>
+              <div style={{ fontSize: 11, color: "#546e7a" }}>Sleep het bestand hierheen — tabblad "App Import" wordt automatisch herkend</div>
             </div>
-          ))}
-          <div style={{ fontSize: 10, color: "#37474f", marginTop: 10 }}>
-            Datums, namen en koppelingen zijn daarna volledig aanpasbaar.
+            <span style={{ background: "linear-gradient(135deg,#1976d2,#0d47a1)", color: "#fff", padding: "7px 16px", borderRadius: 6, fontSize: 11, fontWeight: 700, whiteSpace: "nowrap" }}>KIEZEN</span>
           </div>
+        </div>
+        <input id="planningUploadInput" type="file" accept=".xlsx,.xls" style={{ display: "none" }}
+          onChange={e => { if (e.target.files[0]) { parseExcelPlanning(e.target.files[0]); e.target.value=""; } }} />
+        {uploadError && (
+          <div style={{ padding: "9px 13px", background: "rgba(230,81,0,.12)", border: "1px solid #e65100", borderRadius: 7, fontSize: 11, color: "#ff8a65", marginBottom: 12 }}>⚠ {uploadError}</div>
+        )}
+        <div style={{ display: "flex", alignItems: "center", gap: 10, margin: "16px 0" }}>
+          <div style={{ flex: 1, height: 1, background: "#1e4976" }} /><span style={{ fontSize: 10, color: "#37474f" }}>OF</span><div style={{ flex: 1, height: 1, background: "#1e4976" }} />
+        </div>
+        <div style={{ display: "flex", gap: 10 }}>
+          <button onClick={initDefault} style={{ flex: 1, background: "rgba(25,118,210,.12)", border: "1px solid #1e4976", color: "#90caf9", padding: "12px 18px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit" }}>✦ STANDAARD WERKPAKKETTEN</button>
+          <button onClick={() => addTask(null)} style={{ background: "transparent", border: "1px solid #1e4976", color: "#546e7a", padding: "12px 18px", borderRadius: 8, cursor: "pointer", fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit" }}>+ LEEG BEGIN</button>
         </div>
       </div>
     );

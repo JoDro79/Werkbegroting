@@ -1,0 +1,2 @@
+PageBegroting takes: posts, setPosts, staartkosten, setStaartkosten, projectName, setProjectName
+and renders the begroting UI without the header (header is in App.jsx)
