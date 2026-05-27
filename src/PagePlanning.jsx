@@ -182,19 +182,133 @@ function tryParseMSProjectSheet(data) {
   return tasks;
 }
 
+// ── UploadZone: self-contained, no external state for drag ────────────────────
+function UploadZone({ onFile, error }) {
+  const inputRef = useState(null)[0];
+  const zoneRef = { current: null };
+
+  const preventDefaults = e => { e.preventDefault(); e.stopPropagation(); };
+
+  const highlight = e => {
+    preventDefaults(e);
+    if (zoneRef.current) {
+      zoneRef.current.style.borderColor = "#42a5f5";
+      zoneRef.current.style.background = "rgba(25,118,210,.1)";
+    }
+  };
+
+  const unhighlight = e => {
+    preventDefaults(e);
+    if (zoneRef.current) {
+      zoneRef.current.style.borderColor = "#1e4976";
+      zoneRef.current.style.background = "rgba(25,118,210,.03)";
+    }
+  };
+
+  const handleDrop = e => {
+    preventDefaults(e);
+    unhighlight(e);
+    const file = e.dataTransfer.files[0];
+    if (file) onFile(file);
+  };
+
+  const openPicker = () => {
+    const inp = document.getElementById("planningFileInput");
+    if (inp) { inp.value = ""; inp.click(); }
+  };
+
+  return (
+    <div style={{ maxWidth: 600, margin: "40px auto" }}>
+      <div style={{ marginBottom: 28 }}>
+        <h2 style={{ fontSize: 18, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 8 }}>PLANNING LADEN</h2>
+        <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.8 }}>
+          Exporteer je MS Project planning naar Excel:<br />
+          <span style={{ color: "#78909c" }}>Bestand → Opslaan als → Excel-werkmap (.xlsx)</span>
+        </p>
+      </div>
+
+      {/* Drop zone */}
+      <div
+        ref={el => { zoneRef.current = el; }}
+        onDragEnter={highlight}
+        onDragOver={highlight}
+        onDragLeave={unhighlight}
+        onDrop={handleDrop}
+        style={{
+          border: "2px dashed #1e4976", borderRadius: 14,
+          padding: "52px 28px", textAlign: "center",
+          background: "rgba(25,118,210,.03)", transition: "all .2s",
+        }}
+      >
+        <div style={{ fontSize: 40, marginBottom: 14 }}>📅</div>
+        <div style={{ fontSize: 14, color: "#90caf9", fontWeight: 700, marginBottom: 8 }}>
+          Sleep het MS Project Excel-bestand hiernaartoe
+        </div>
+        <div style={{ fontSize: 11, color: "#546e7a", marginBottom: 20 }}>
+          of klik op de knop hieronder om een bestand te kiezen
+        </div>
+        <button
+          onClick={openPicker}
+          style={{
+            background: "linear-gradient(135deg,#1976d2,#0d47a1)", border: "none",
+            color: "#fff", padding: "10px 24px", borderRadius: 7, cursor: "pointer",
+            fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit",
+            boxShadow: "0 2px 12px rgba(25,118,210,.4)",
+          }}
+        >
+          BESTAND KIEZEN
+        </button>
+      </div>
+
+      {/* Separate, always-visible file input */}
+      <input
+        id="planningFileInput"
+        type="file"
+        accept=".xlsx,.xls"
+        style={{ display: "none" }}
+        onChange={e => { if (e.target.files && e.target.files[0]) onFile(e.target.files[0]); }}
+      />
+
+      {error && (
+        <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(230,81,0,.12)", border: "1px solid #e65100", borderRadius: 7, fontSize: 11, color: "#ff8a65" }}>
+          ⚠ {error}
+        </div>
+      )}
+
+      <div style={{ marginTop: 24, padding: 18, background: "rgba(255,255,255,.03)", borderRadius: 10, border: "1px solid #1e4976" }}>
+        <div style={{ fontSize: 10, color: "#546e7a", letterSpacing: 1, marginBottom: 10 }}>HOE TE EXPORTEREN UIT MS PROJECT</div>
+        {["Open je planning in MS Project", "Klik op Bestand → Opslaan als", "Kies bestandstype: Excel-werkmap (*.xlsx)", "Sla op en upload hier"].map((s, i) => (
+          <div key={i} style={{ display: "flex", gap: 10, marginBottom: 7, fontSize: 12, color: "#78909c" }}>
+            <span style={{ color: "#1976d2", fontWeight: 700, minWidth: 18 }}>{i + 1}.</span>{s}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelingen, posts }) {
   const [dragging, setDragging] = useState(false);
-  const fileRef = useState(null);
+  const [error, setError] = useState("");
 
   const handleFile = useCallback(async (file) => {
-    const buf = await file.arrayBuffer();
-    const parsed = parseMSProject(buf);
-    setTasks(parsed);
-    // Auto-suggest koppelingen based on name similarity
-    const suggested = {};
-    parsed.forEach(t => {
-      if (!suggested[t.id]) {
+    if (!file) return;
+    if (!file.name.match(/\.xlsx?$/i)) {
+      setError("Alleen .xlsx bestanden worden ondersteund");
+      return;
+    }
+    setError("");
+    try {
+      const buf = await file.arrayBuffer();
+      const parsed = parseMSProject(buf);
+      if (parsed.length === 0) {
+        setError("Geen taken gevonden. Controleer of het een MS Project Excel export is (Bestand → Opslaan als → Excel-werkmap).");
+        return;
+      }
+      setTasks(parsed);
+      const suggested = {};
+      parsed.forEach(t => {
         const nl = t.name.toLowerCase();
         const matches = [];
         if (nl.includes("grond") || nl.includes("sleuf") || nl.includes("graaf")) matches.push("GRONDWERK SLEUVEN");
@@ -204,7 +318,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
         if (nl.includes("verharding") || nl.includes("asfalt") || nl.includes("straat") || nl.includes("tegel")) matches.push("VERHARDINGEN");
         if (nl.includes("voorber") || nl.includes("inrichten") || nl.includes("werkterrein")) matches.push("VOORBEREIDENDE WERKZAAMHEDEN");
         if (nl.includes("groen") || nl.includes("inzaai") || nl.includes("berm")) matches.push("GROENVOORZIENINGEN");
-        if (nl.includes("oplevert") || nl.includes("revisie") || nl.includes("eindmeting") || nl.includes("dossier")) matches.push("OPLEVERING EN REVISIE");
+        if (nl.includes("oplever") || nl.includes("revisie") || nl.includes("eindmeting") || nl.includes("dossier")) matches.push("OPLEVERING EN REVISIE");
         if (nl.includes("station")) matches.push("STATIONS");
         if (nl.includes("glasvezel") || nl.includes("fiber")) matches.push("KABEL/LEIDINGWERK INFORMATIE DISTRIBUTIE MS");
         if (nl.includes("aarding")) matches.push("AARDING CS - OS (op het veld)");
@@ -215,19 +329,12 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
             percentage: i === matches.length - 1 ? 100 - pctEach * (matches.length - 1) : pctEach,
           }));
         }
-      }
-    });
-    setKoppelingen(suggested);
+      });
+      setKoppelingen(suggested);
+    } catch (err) {
+      setError("Fout bij inlezen: " + err.message);
+    }
   }, [setTasks, setKoppelingen]);
-
-  const onDrop = useCallback(e => {
-    e.preventDefault();
-    e.stopPropagation();
-    setDragging(false);
-    e.currentTarget && (e.currentTarget.style.borderColor = "#1e4976");
-    const f = e.dataTransfer.files[0];
-    if (f) handleFile(f);
-  }, [handleFile]);
 
   const addKoppeling = (taskId) => {
     setKoppelingen(prev => ({
@@ -267,49 +374,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
   return (
     <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 60px" }}>
       {tasks.length === 0 ? (
-        // ── Upload screen ──
-        <div style={{ maxWidth: 600, margin: "40px auto" }}>
-          <div style={{ marginBottom: 28 }}>
-            <h2 style={{ fontSize: 18, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 6 }}>PLANNING LADEN</h2>
-            <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.8 }}>
-              Exporteer je MS Project planning naar Excel:<br />
-              <span style={{ color: "#78909c" }}>Bestand → Opslaan als → Excel-werkmap (.xlsx)</span><br />
-              Of: Rapport → Visuele rapporten → kies taakoverzicht
-            </p>
-          </div>
-          <div
-            onDrop={onDrop}
-            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
-            onDragLeave={e => { e.stopPropagation(); setDragging(false); }}
-            onClick={() => { document.getElementById("planningFile").value=""; document.getElementById("planningFile").click(); }}
-            style={{
-              border: `2px dashed ${dragging ? "#42a5f5" : "#1e4976"}`,
-              borderRadius: 14, padding: "50px 28px", textAlign: "center",
-              cursor: "pointer", background: dragging ? "rgba(25,118,210,.1)" : "rgba(25,118,210,.03)",
-              transition: "all .2s",
-            }}
-          >
-            <div style={{ fontSize: 40, marginBottom: 12 }}>📅</div>
-            <div style={{ fontSize: 14, color: "#90caf9", fontWeight: 700, marginBottom: 6 }}>Sleep MS Project export hierheen</div>
-            <div style={{ fontSize: 11, color: "#37474f" }}>Excel export (.xlsx) van MS Project taakoverzicht</div>
-          </div>
-          <input id="planningFile" type="file" accept=".xlsx" style={{ display: "none" }}
-            onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
-
-          <div style={{ marginTop: 24, padding: 18, background: "rgba(255,255,255,.03)", borderRadius: 10, border: "1px solid #1e4976" }}>
-            <div style={{ fontSize: 10, color: "#546e7a", letterSpacing: 1, marginBottom: 10 }}>HOE TE EXPORTEREN UIT MS PROJECT</div>
-            {[
-              "Open je planning in MS Project",
-              "Klik op Bestand → Opslaan als",
-              "Kies als bestandstype: Excel-werkmap (*.xlsx)",
-              "Sla op en upload hier",
-            ].map((s, i) => (
-              <div key={i} style={{ display: "flex", gap: 10, marginBottom: 7, fontSize: 12, color: "#78909c" }}>
-                <span style={{ color: "#1976d2", fontWeight: 700, minWidth: 18 }}>{i + 1}.</span> {s}
-              </div>
-            ))}
-          </div>
-        </div>
+        <UploadZone onFile={handleFile} dragging={dragging} setDragging={setDragging} error={error} />
       ) : (
         // ── Koppeling screen ──
         <div>
