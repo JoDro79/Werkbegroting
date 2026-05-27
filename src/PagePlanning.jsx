@@ -1,5 +1,4 @@
 import { useState, useCallback } from "react";
-import * as XLSX from "xlsx";
 
 const HOOFDSTUKKEN = [
   "VOORBEREIDENDE WERKZAAMHEDEN",
@@ -24,7 +23,7 @@ const CHAP_SHORT = {
   "GRONDWERK SLEUVEN": "Grondwerk",
   "GROENVOORZIENINGEN": "Groenwerk",
   "KRUISINGEN": "Kruisingen",
-  "KABEL/LEIDINGWERK ELEKTRA": "Kabelwerk LS/MS",
+  "KABEL/LEIDINGWERK ELEKTRA": "Kabelwerk",
   "MONTAGEWERKZAAMHEDEN ELEKTRA": "Montage",
   "AARDING CS - OS (op het veld)": "Aarding",
   "KABEL/LEIDINGWERK INFORMATIE DISTRIBUTIE MS": "Glasvezel",
@@ -35,307 +34,146 @@ const CHAP_SHORT = {
   "TER BESCHIKKING STELLEN": "T.b.s.",
 };
 
-// Robust date parser: handles Excel serials, JS Date objects, and many string formats
-function parseDate(v) {
-  if (!v) return null;
-  if (v instanceof Date) return isNaN(v) ? null : v;
-  // Excel serial number (integer or float, but NOT a year like 2025)
-  if (typeof v === "number" && v > 40000 && v < 60000) {
-    // Excel epoch: Jan 1 1900 = 1, but there's a leap year bug so offset is 25569 for Unix epoch
-    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
-    return isNaN(d) ? null : d;
-  }
-  const s = String(v).trim();
+// Default werkpakketten op basis van typische kabelwerkprojecten
+const DEFAULT_TASKS = [
+  { name: "Voorbereiding",     defaultHoofdstuk: "VOORBEREIDENDE WERKZAAMHEDEN" },
+  { name: "Grondwerk",         defaultHoofdstuk: "GRONDWERK SLEUVEN" },
+  { name: "Kruisingen / HDD",  defaultHoofdstuk: "KRUISINGEN" },
+  { name: "Kabelwerk",         defaultHoofdstuk: "KABEL/LEIDINGWERK ELEKTRA" },
+  { name: "Montagewerk",       defaultHoofdstuk: "MONTAGEWERKZAAMHEDEN ELEKTRA" },
+  { name: "Verhardingsherstel",defaultHoofdstuk: "VERHARDINGEN" },
+  { name: "Oplevering",        defaultHoofdstuk: "OPLEVERING EN REVISIE" },
+];
+
+const euro = v => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v || 0);
+
+function uid() { return Math.random().toString(36).slice(2, 8); }
+
+function dateToInput(d) {
+  if (!d) return "";
+  const dd = String(d.getDate()).padStart(2, "0");
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  return `${d.getFullYear()}-${mm}-${dd}`;
+}
+
+function inputToDate(s) {
   if (!s) return null;
-  // dd-mm-yyyy or d-m-yyyy
-  let m = s.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
-  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
-  // yyyy-mm-dd
-  m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
-  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
-  // "1 apr 2025", "01 april 2025", "ma 1 apr 2025"
-  const NL_MONTHS = {jan:0,feb:1,mrt:2,mar:2,apr:3,mei:4,jun:5,jul:6,aug:7,sep:8,okt:9,oct:9,nov:10,dec:11};
-  m = s.match(/(\d{1,2})\s+([a-z]+)\s+(\d{4})/i);
-  if (m) {
-    const mo = NL_MONTHS[m[2].toLowerCase().substring(0,3)];
-    if (mo !== undefined) return new Date(+m[3], mo, +m[1]);
-  }
-  // "apr 1, 2025"
-  m = s.match(/([a-z]+)\s+(\d{1,2})[,\s]+(\d{4})/i);
-  if (m) {
-    const mo = NL_MONTHS[m[1].toLowerCase().substring(0,3)];
-    if (mo !== undefined) return new Date(+m[3], mo, +m[2]);
-  }
-  // Fallback: let JS try
-  const d = new Date(s);
+  const d = new Date(s + "T00:00:00");
   return isNaN(d) ? null : d;
 }
 
-// Keyword sets for column detection
-const COL_KEYWORDS = {
-  name:   ["taaknaam","task name","name","naam","taak"],
-  start:  ["begin","start","startdatum","begindatum"],
-  finish: ["voltooiing","finish","einddatum","einde","end","gereed"],
-  level:  ["overzichtsniveau","outline level","niveau","wbs level","level"],
-  pct:    ["% voltooid","% complete","voortgang","progress","gereedheid"],
-  id:     ["id","nr","nummer"],
-  dur:    ["duur","duration"],
+// ── Stijlen ────────────────────────────────────────────────────────────────────
+const S = {
+  input: {
+    background: "#0d1520", border: "1px solid #1e4976", color: "#cfd8dc",
+    padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "inherit",
+    outline: "none",
+  },
+  dateInput: {
+    background: "#0d1520", border: "1px solid #1e4976", color: "#90caf9",
+    padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "inherit",
+    outline: "none", width: 130,
+  },
+  select: {
+    background: "#0d1520", border: "1px solid #1e4976", color: "#90caf9",
+    padding: "5px 8px", borderRadius: 5, fontSize: 11, fontFamily: "inherit",
+    outline: "none",
+  },
+  btnSmall: {
+    background: "rgba(25,118,210,.15)", border: "1px solid #1e4976",
+    color: "#90caf9", padding: "4px 10px", borderRadius: 4,
+    cursor: "pointer", fontSize: 10, fontFamily: "inherit", letterSpacing: 1,
+  },
+  btnDanger: {
+    background: "transparent", border: "none",
+    color: "#37474f", padding: "4px 6px",
+    cursor: "pointer", fontSize: 14, fontFamily: "inherit",
+  },
+  btnAdd: {
+    background: "rgba(25,118,210,.12)", border: "1px dashed #1e4976",
+    color: "#546e7a", padding: "7px 14px", borderRadius: 6,
+    cursor: "pointer", fontSize: 11, fontFamily: "inherit",
+    width: "100%", textAlign: "left", marginTop: 4,
+  },
 };
 
-function detectCol(headerRow, key) {
-  const kws = COL_KEYWORDS[key];
-  for (let j = 0; j < headerRow.length; j++) {
-    const c = headerRow[j] ? String(headerRow[j]).toLowerCase().trim() : "";
-    if (kws.some(k => c === k || c.startsWith(k))) return j;
-  }
-  return -1;
-}
-
-function parseMSProject(arrayBuffer) {
-  // raw:true keeps numbers as numbers, cellDates:true converts date serials
-  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: "array", cellDates: true, raw: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  // Try every sheet, use the one with most tasks
-  let bestTasks = [];
-  for (const sheetName of wb.SheetNames) {
-    const sheet = wb.Sheets[sheetName];
-    const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
-    const tasks = tryParseMSProjectSheet(data);
-    if (tasks.length > bestTasks.length) bestTasks = tasks;
-  }
-  return bestTasks;
-}
-
-function tryParseMSProjectSheet(data) {
-  // Find header row: first row where we can detect a name column
-  let headerRowIdx = -1;
-  let colMap = {};
-
-  for (let i = 0; i < Math.min(15, data.length); i++) {
-    const row = data[i] || [];
-    const nameCol = detectCol(row, "name");
-    if (nameCol >= 0) {
-      headerRowIdx = i;
-      colMap.name   = nameCol;
-      colMap.start  = detectCol(row, "start");
-      colMap.finish = detectCol(row, "finish");
-      colMap.level  = detectCol(row, "level");
-      colMap.pct    = detectCol(row, "pct");
-      colMap.id     = detectCol(row, "id");
-      break;
-    }
-  }
-
-  // Fallback: if no header found, assume MS Project default export layout
-  // ID | Name | Duration | Start | Finish | % Complete | ... | Outline Level
-  if (headerRowIdx < 0) {
-    headerRowIdx = 0;
-    // Scan first data rows to guess columns heuristically
-    for (let i = 1; i < Math.min(20, data.length); i++) {
-      const row = data[i] || [];
-      // Find the column with the longest text (= task name)
-      // Find two date-like columns (start, finish)
-      const dates = [];
-      let nameGuess = -1;
-      for (let j = 0; j < row.length; j++) {
-        const v = row[j];
-        if (v instanceof Date || (typeof v === "number" && v > 40000 && v < 60000)) {
-          dates.push(j);
-        }
-        if (typeof v === "string" && v.length > 5 && nameGuess < 0) nameGuess = j;
-      }
-      if (dates.length >= 2 && nameGuess >= 0) {
-        colMap = { name: nameGuess, start: dates[0], finish: dates[1], level: -1, pct: -1, id: 0 };
-        break;
-      }
-    }
-    if (colMap.name === undefined) return []; // can't parse
-  }
-
-  const tasks = [];
-  for (let i = headerRowIdx + 1; i < data.length; i++) {
-    const row = data[i] || [];
-    const rawName = row[colMap.name];
-    if (!rawName) continue;
-    const name = String(rawName).trim();
-    if (!name) continue;
-
-    const start  = parseDate(colMap.start  >= 0 ? row[colMap.start]  : null);
-    const finish = parseDate(colMap.finish >= 0 ? row[colMap.finish] : null);
-    if (!start || !finish) continue; // skip rows without dates
-
-    // Level: from outline level col, or from leading spaces in name
-    let level = 0;
-    if (colMap.level >= 0 && row[colMap.level] != null) {
-      level = parseInt(row[colMap.level]) || 0;
-    } else {
-      // Count leading spaces as indent proxy
-      const spaces = String(rawName).match(/^(\s+)/);
-      level = spaces ? Math.floor(spaces[1].length / 2) : 0;
-    }
-
-    const pct = colMap.pct >= 0 ? (parseFloat(String(row[colMap.pct] || "").replace(/[%\s]/g,"")) || 0) : 0;
-    const id  = colMap.id >= 0 && row[colMap.id] != null ? String(row[colMap.id]) : String(i);
-
-    tasks.push({ id, name, start, finish, level, pct });
-  }
-  return tasks;
-}
-
-// ── UploadZone: self-contained, no external state for drag ────────────────────
-function UploadZone({ onFile, error }) {
-  const inputRef = useState(null)[0];
-  const zoneRef = { current: null };
-
-  const preventDefaults = e => { e.preventDefault(); e.stopPropagation(); };
-
-  const highlight = e => {
-    preventDefaults(e);
-    if (zoneRef.current) {
-      zoneRef.current.style.borderColor = "#42a5f5";
-      zoneRef.current.style.background = "rgba(25,118,210,.1)";
-    }
-  };
-
-  const unhighlight = e => {
-    preventDefaults(e);
-    if (zoneRef.current) {
-      zoneRef.current.style.borderColor = "#1e4976";
-      zoneRef.current.style.background = "rgba(25,118,210,.03)";
-    }
-  };
-
-  const handleDrop = e => {
-    preventDefaults(e);
-    unhighlight(e);
-    const file = e.dataTransfer.files[0];
-    if (file) onFile(file);
-  };
-
-  const openPicker = () => {
-    const inp = document.getElementById("planningFileInput");
-    if (inp) { inp.value = ""; inp.click(); }
-  };
-
-  return (
-    <div style={{ maxWidth: 600, margin: "40px auto" }}>
-      <div style={{ marginBottom: 28 }}>
-        <h2 style={{ fontSize: 18, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 8 }}>PLANNING LADEN</h2>
-        <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.8 }}>
-          Exporteer je MS Project planning naar Excel:<br />
-          <span style={{ color: "#78909c" }}>Bestand → Opslaan als → Excel-werkmap (.xlsx)</span>
-        </p>
-      </div>
-
-      {/* Drop zone */}
-      <div
-        ref={el => { zoneRef.current = el; }}
-        onDragEnter={highlight}
-        onDragOver={highlight}
-        onDragLeave={unhighlight}
-        onDrop={handleDrop}
-        style={{
-          border: "2px dashed #1e4976", borderRadius: 14,
-          padding: "52px 28px", textAlign: "center",
-          background: "rgba(25,118,210,.03)", transition: "all .2s",
-        }}
-      >
-        <div style={{ fontSize: 40, marginBottom: 14 }}>📅</div>
-        <div style={{ fontSize: 14, color: "#90caf9", fontWeight: 700, marginBottom: 8 }}>
-          Sleep het MS Project Excel-bestand hiernaartoe
-        </div>
-        <div style={{ fontSize: 11, color: "#546e7a", marginBottom: 20 }}>
-          of klik op de knop hieronder om een bestand te kiezen
-        </div>
-        <button
-          onClick={openPicker}
-          style={{
-            background: "linear-gradient(135deg,#1976d2,#0d47a1)", border: "none",
-            color: "#fff", padding: "10px 24px", borderRadius: 7, cursor: "pointer",
-            fontSize: 11, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit",
-            boxShadow: "0 2px 12px rgba(25,118,210,.4)",
-          }}
-        >
-          BESTAND KIEZEN
-        </button>
-      </div>
-
-      {/* Separate, always-visible file input */}
-      <input
-        id="planningFileInput"
-        type="file"
-        accept=".xlsx,.xls"
-        style={{ display: "none" }}
-        onChange={e => { if (e.target.files && e.target.files[0]) onFile(e.target.files[0]); }}
-      />
-
-      {error && (
-        <div style={{ marginTop: 14, padding: "10px 14px", background: "rgba(230,81,0,.12)", border: "1px solid #e65100", borderRadius: 7, fontSize: 11, color: "#ff8a65" }}>
-          ⚠ {error}
-        </div>
-      )}
-
-      <div style={{ marginTop: 24, padding: 18, background: "rgba(255,255,255,.03)", borderRadius: 10, border: "1px solid #1e4976" }}>
-        <div style={{ fontSize: 10, color: "#546e7a", letterSpacing: 1, marginBottom: 10 }}>HOE TE EXPORTEREN UIT MS PROJECT</div>
-        {["Open je planning in MS Project", "Klik op Bestand → Opslaan als", "Kies bestandstype: Excel-werkmap (*.xlsx)", "Sla op en upload hier"].map((s, i) => (
-          <div key={i} style={{ display: "flex", gap: 10, marginBottom: 7, fontSize: 12, color: "#78909c" }}>
-            <span style={{ color: "#1976d2", fontWeight: 700, minWidth: 18 }}>{i + 1}.</span>{s}
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Component ─────────────────────────────────────────────────────────────────
+// ── Hoofd component ────────────────────────────────────────────────────────────
 export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelingen, posts }) {
-  const [dragging, setDragging] = useState(false);
-  const [error, setError] = useState("");
 
-  const handleFile = useCallback(async (file) => {
-    if (!file) return;
-    if (!file.name.match(/\.xlsx?$/i)) {
-      setError("Alleen .xlsx bestanden worden ondersteund");
-      return;
-    }
-    setError("");
-    try {
-      const buf = await file.arrayBuffer();
-      const parsed = parseMSProject(buf);
-      if (parsed.length === 0) {
-        setError("Geen taken gevonden. Controleer of het een MS Project Excel export is (Bestand → Opslaan als → Excel-werkmap).");
-        return;
+  // Costs per hoofdstuk (for display)
+  const kostenPerHoofdstuk = {};
+  if (posts) {
+    posts.forEach(p => {
+      const k = p.hoeveelheid * p.kostprijs;
+      kostenPerHoofdstuk[p.hoofdstuk] = (kostenPerHoofdstuk[p.hoofdstuk] || 0) + k;
+    });
+  }
+
+  // ── Initialiseer met standaard werkpakketten als leeg ──────────────────────
+  const initDefault = () => {
+    const today = new Date();
+    const newTasks = DEFAULT_TASKS.map((t, i) => ({
+      id: uid(),
+      name: t.name,
+      start: new Date(today.getFullYear(), today.getMonth() + i * 1, 1),
+      finish: new Date(today.getFullYear(), today.getMonth() + i * 1 + 1, 0),
+      level: 0,
+      pct: 0,
+    }));
+    setTasks(newTasks);
+    // Auto-koppel op basis van defaultHoofdstuk
+    const kops = {};
+    newTasks.forEach((t, i) => {
+      kops[t.id] = [{ hoofdstuk: DEFAULT_TASKS[i].defaultHoofdstuk, percentage: 100 }];
+    });
+    setKoppelingen(kops);
+  };
+
+  // ── Task CRUD ──────────────────────────────────────────────────────────────
+  const addTask = (parentId) => {
+    const parent = tasks.find(t => t.id === parentId);
+    const level = parentId ? (parent ? parent.level + 1 : 1) : 0;
+    const newTask = {
+      id: uid(),
+      name: level === 0 ? "Nieuw werkpakket" : "Nieuwe deeltaak",
+      start: parent ? new Date(parent.start) : new Date(),
+      finish: parent ? new Date(parent.finish) : new Date(Date.now() + 30 * 86400000),
+      level,
+      pct: 0,
+      parentId: parentId || null,
+    };
+    if (parentId) {
+      // Insert after parent and its existing children
+      const parentIdx = tasks.findIndex(t => t.id === parentId);
+      const children = tasks.filter(t => t.parentId === parentId);
+      let insertIdx = parentIdx + 1;
+      if (children.length > 0) {
+        const lastChild = tasks.findLastIndex(t => t.parentId === parentId);
+        insertIdx = lastChild + 1;
       }
-      setTasks(parsed);
-      const suggested = {};
-      parsed.forEach(t => {
-        const nl = t.name.toLowerCase();
-        const matches = [];
-        if (nl.includes("grond") || nl.includes("sleuf") || nl.includes("graaf")) matches.push("GRONDWERK SLEUVEN");
-        if (nl.includes("kabel") && !nl.includes("montage") && !nl.includes("glasvezel")) matches.push("KABEL/LEIDINGWERK ELEKTRA");
-        if (nl.includes("montage") || nl.includes("mof") || nl.includes("eindsluiting")) matches.push("MONTAGEWERKZAAMHEDEN ELEKTRA");
-        if (nl.includes("hdd") || nl.includes("boring") || nl.includes("kruising") || nl.includes("persing") || nl.includes("bemaling")) matches.push("KRUISINGEN");
-        if (nl.includes("verharding") || nl.includes("asfalt") || nl.includes("straat") || nl.includes("tegel")) matches.push("VERHARDINGEN");
-        if (nl.includes("voorber") || nl.includes("inrichten") || nl.includes("werkterrein")) matches.push("VOORBEREIDENDE WERKZAAMHEDEN");
-        if (nl.includes("groen") || nl.includes("inzaai") || nl.includes("berm")) matches.push("GROENVOORZIENINGEN");
-        if (nl.includes("oplever") || nl.includes("revisie") || nl.includes("eindmeting") || nl.includes("dossier")) matches.push("OPLEVERING EN REVISIE");
-        if (nl.includes("station")) matches.push("STATIONS");
-        if (nl.includes("glasvezel") || nl.includes("fiber")) matches.push("KABEL/LEIDINGWERK INFORMATIE DISTRIBUTIE MS");
-        if (nl.includes("aarding")) matches.push("AARDING CS - OS (op het veld)");
-        if (matches.length > 0) {
-          const pctEach = Math.round(100 / matches.length);
-          suggested[t.id] = matches.map((h, i) => ({
-            hoofdstuk: h,
-            percentage: i === matches.length - 1 ? 100 - pctEach * (matches.length - 1) : pctEach,
-          }));
-        }
-      });
-      setKoppelingen(suggested);
-    } catch (err) {
-      setError("Fout bij inlezen: " + err.message);
+      const newTasks = [...tasks];
+      newTasks.splice(insertIdx, 0, newTask);
+      setTasks(newTasks);
+    } else {
+      setTasks(prev => [...prev, newTask]);
     }
-  }, [setTasks, setKoppelingen]);
+  };
 
+  const updateTask = (id, field, value) => {
+    setTasks(prev => prev.map(t => t.id === id ? { ...t, [field]: value } : t));
+  };
+
+  const deleteTask = (id) => {
+    // Also delete children
+    setTasks(prev => prev.filter(t => t.id !== id && t.parentId !== id));
+    setKoppelingen(prev => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+  };
+
+  // ── Koppeling CRUD ─────────────────────────────────────────────────────────
   const addKoppeling = (taskId) => {
     setKoppelingen(prev => ({
       ...prev,
@@ -353,7 +191,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
   const removeKoppeling = (taskId, idx) => {
     setKoppelingen(prev => ({
       ...prev,
-      [taskId]: prev[taskId].filter((_, i) => i !== idx),
+      [taskId]: (prev[taskId] || []).filter((_, i) => i !== idx),
     }));
   };
 
@@ -361,147 +199,223 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
 
   const fmtDate = d => d ? d.toLocaleDateString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric" }) : "—";
 
-  // Costs per hoofdstuk
-  const kostenPerHoofdstuk = {};
-  if (posts) {
-    posts.forEach(p => {
-      const k = p.hoeveelheid * p.kostprijs;
-      kostenPerHoofdstuk[p.hoofdstuk] = (kostenPerHoofdstuk[p.hoofdstuk] || 0) + k;
-    });
+  // ── Leeg scherm ─────────────────────────────────────────────────────────────
+  if (tasks.length === 0) {
+    return (
+      <div style={{ maxWidth: 680, margin: "60px auto", padding: "0 20px", textAlign: "center" }}>
+        <div style={{ fontSize: 40, marginBottom: 16 }}>📅</div>
+        <h2 style={{ fontSize: 18, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 10 }}>
+          UITVOERINGSPLANNING
+        </h2>
+        <p style={{ fontSize: 12, color: "#546e7a", lineHeight: 1.9, marginBottom: 32 }}>
+          Maak de planning handmatig aan met standaard werkpakketten,<br />
+          of begin met een leeg schema en voeg eigen taken toe.
+        </p>
+        <div style={{ display: "flex", gap: 12, justifyContent: "center" }}>
+          <button onClick={initDefault} style={{
+            background: "linear-gradient(135deg,#1976d2,#0d47a1)", border: "none",
+            color: "#fff", padding: "12px 28px", borderRadius: 8, cursor: "pointer",
+            fontSize: 12, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit",
+            boxShadow: "0 2px 14px rgba(25,118,210,.4)",
+          }}>
+            ✦ START MET STANDAARD WERKPAKKETTEN
+          </button>
+          <button onClick={() => addTask(null)} style={{
+            background: "transparent", border: "1px solid #1e4976",
+            color: "#546e7a", padding: "12px 24px", borderRadius: 8, cursor: "pointer",
+            fontSize: 12, fontWeight: 700, letterSpacing: 1, fontFamily: "inherit",
+          }}>
+            + LEEG BEGIN
+          </button>
+        </div>
+        <div style={{ marginTop: 32, padding: 20, background: "rgba(255,255,255,.02)", borderRadius: 10, border: "1px solid #1e4976", textAlign: "left" }}>
+          <div style={{ fontSize: 10, color: "#546e7a", letterSpacing: 1, marginBottom: 12 }}>STANDAARD WERKPAKKETTEN</div>
+          {DEFAULT_TASKS.map((t, i) => (
+            <div key={i} style={{ display: "flex", gap: 10, marginBottom: 7, fontSize: 11, color: "#78909c", alignItems: "center" }}>
+              <span style={{ color: "#1976d2", minWidth: 16 }}>▸</span>
+              <span style={{ fontWeight: 700, color: "#90a4ae" }}>{t.name}</span>
+              <span style={{ color: "#37474f" }}>→ {CHAP_SHORT[t.defaultHoofdstuk]}</span>
+            </div>
+          ))}
+          <div style={{ fontSize: 10, color: "#37474f", marginTop: 10 }}>
+            Datums, namen en koppelingen zijn daarna volledig aanpasbaar.
+          </div>
+        </div>
+      </div>
+    );
   }
-  const euro = v => new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR", maximumFractionDigits: 0 }).format(v || 0);
+
+  // ── Planning editor ─────────────────────────────────────────────────────────
+  const topLevelTasks = tasks.filter(t => !t.parentId && t.level === 0);
 
   return (
-    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 60px" }}>
-      {tasks.length === 0 ? (
-        <UploadZone onFile={handleFile} dragging={dragging} setDragging={setDragging} error={error} />
-      ) : (
-        // ── Koppeling screen ──
+    <div style={{ maxWidth: 1100, margin: "0 auto", padding: "20px 20px 80px" }}>
+      {/* Header */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
         <div>
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 20 }}>
-            <div>
-              <h2 style={{ fontSize: 16, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 4 }}>
-                KOPPELING PLANNING ↔ BEGROTING
-              </h2>
-              <p style={{ fontSize: 11, color: "#546e7a" }}>
-                {tasks.length} taken geladen · Wijs per werkpakket de bijbehorende kostenposten toe
-              </p>
-            </div>
-            <button
-              onClick={() => { setTasks([]); setKoppelingen({}); }}
-              style={{ background: "transparent", border: "1px solid #37474f", color: "#78909c", padding: "6px 14px", borderRadius: 6, cursor: "pointer", fontSize: 10, fontFamily: "inherit", letterSpacing: 1 }}
-            >↩ NIEUW BESTAND</button>
-          </div>
+          <h2 style={{ fontSize: 15, fontWeight: 900, color: "#90caf9", letterSpacing: 2, marginBottom: 3 }}>
+            KOPPELING PLANNING ↔ BEGROTING
+          </h2>
+          <p style={{ fontSize: 11, color: "#546e7a" }}>
+            {tasks.length} taken · {Object.keys(koppelingen).filter(k => totalPct(k) === 100).length} volledig gekoppeld
+          </p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button onClick={() => addTask(null)} style={{
+            ...S.btnSmall, background: "rgba(25,118,210,.2)", fontWeight: 700,
+          }}>+ WERKPAKKET</button>
+          <button onClick={() => { setTasks([]); setKoppelingen({}); }} style={S.btnSmall}>
+            ↩ RESET
+          </button>
+        </div>
+      </div>
 
-          {/* Legend */}
-          <div style={{ display: "flex", gap: 16, marginBottom: 16, fontSize: 10, color: "#546e7a" }}>
-            <span>🟢 = koppeling compleet (100%)</span>
-            <span>🟡 = gedeeltelijk (&lt;100%)</span>
-            <span>⚪ = geen koppeling</span>
-          </div>
+      {/* Legend */}
+      <div style={{ display: "flex", gap: 16, marginBottom: 14, fontSize: 10, color: "#546e7a" }}>
+        <span>🟢 koppeling 100%</span>
+        <span>🟡 onvolledig</span>
+        <span>⚪ niet gekoppeld</span>
+      </div>
 
-          <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-            {tasks.map(task => {
-              const kops = koppelingen[task.id] || [];
-              const tot = totalPct(task.id);
-              const isOk = tot === 100;
-              const hasAny = kops.length > 0;
-              const indent = Math.min(task.level, 3) * 20;
+      {/* Task rows */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+        {tasks.map(task => {
+          const kops = koppelingen[task.id] || [];
+          const tot = totalPct(task.id);
+          const isOk = tot === 100;
+          const hasAny = kops.length > 0;
+          const indent = task.level * 28;
+          const isSubtask = task.level > 0;
 
-              return (
-                <div key={task.id} style={{
-                  borderRadius: 8, overflow: "hidden",
-                  border: `1px solid ${isOk ? "#1b5e20" : hasAny ? "#e65100" : "#1e4976"}`,
-                  marginLeft: indent,
-                  opacity: task.level > 2 ? 0.8 : 1,
-                }}>
-                  {/* Task header */}
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 12,
-                    padding: "8px 14px",
-                    background: isOk ? "rgba(46,125,50,.12)" : hasAny ? "rgba(230,81,0,.08)" : "rgba(255,255,255,.03)",
-                  }}>
-                    <span style={{ fontSize: 12 }}>{isOk ? "🟢" : hasAny ? "🟡" : "⚪"}</span>
-                    <div style={{ flex: 1 }}>
-                      <span style={{ fontSize: 12, fontWeight: task.level <= 1 ? 700 : 400, color: task.level <= 1 ? "#cfd8dc" : "#90a4ae" }}>
-                        {task.name}
-                      </span>
-                      <span style={{ fontSize: 10, color: "#37474f", marginLeft: 10 }}>
-                        {fmtDate(task.start)} → {fmtDate(task.finish)}
-                      </span>
-                    </div>
-                    {tot > 0 && (
-                      <span style={{ fontSize: 10, color: isOk ? "#4caf50" : "#ff8a65", fontWeight: 700 }}>{tot}%</span>
-                    )}
-                    <button
-                      onClick={() => addKoppeling(task.id)}
-                      style={{
-                        background: "rgba(25,118,210,.15)", border: "1px solid #1e4976",
-                        color: "#90caf9", padding: "3px 10px", borderRadius: 4,
-                        cursor: "pointer", fontSize: 10, fontFamily: "inherit",
-                      }}
-                    >+ Koppel</button>
-                  </div>
+          // Kosten toegewezen via koppelingen
+          const taskKosten = kops.reduce((s, k) => {
+            return s + (kostenPerHoofdstuk[k.hoofdstuk] || 0) * k.percentage / 100;
+          }, 0);
 
-                  {/* Koppelingen */}
-                  {kops.length > 0 && (
-                    <div style={{ background: "#0a1520", padding: "8px 14px", display: "flex", flexDirection: "column", gap: 6 }}>
-                      {kops.map((k, idx) => {
-                        const kKosten = kostenPerHoofdstuk[k.hoofdstuk] || 0;
-                        const toegewezen = kKosten * k.percentage / 100;
-                        return (
-                          <div key={idx} style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                            <select
-                              value={k.hoofdstuk}
-                              onChange={e => updateKoppeling(task.id, idx, "hoofdstuk", e.target.value)}
-                              style={{
-                                background: "#0d1520", border: "1px solid #1e4976", color: "#90caf9",
-                                padding: "4px 8px", borderRadius: 4, fontSize: 11, fontFamily: "inherit",
-                                flex: "1 1 200px",
-                              }}
-                            >
-                              {HOOFDSTUKKEN.map(h => (
-                                <option key={h} value={h}>{CHAP_SHORT[h] || h}</option>
-                              ))}
-                            </select>
-                            <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                              <input
-                                type="number" min={0} max={100} step={5}
-                                value={k.percentage}
-                                onChange={e => updateKoppeling(task.id, idx, "percentage", Math.min(100, parseInt(e.target.value) || 0))}
-                                style={{
-                                  background: "#0d1520", border: "1px solid #1e4976", color: "#90caf9",
-                                  padding: "4px 6px", borderRadius: 4, fontSize: 11, width: 56,
-                                  textAlign: "right", fontFamily: "inherit",
-                                }}
-                              />
-                              <span style={{ fontSize: 10, color: "#37474f" }}>%</span>
-                            </div>
-                            {kKosten > 0 && (
-                              <span style={{ fontSize: 10, color: "#546e7a" }}>
-                                → {euro(toegewezen)}
-                              </span>
-                            )}
-                            <button
-                              onClick={() => removeKoppeling(task.id, idx)}
-                              style={{ background: "transparent", border: "none", color: "#37474f", cursor: "pointer", fontSize: 14, padding: "0 4px" }}
-                            >×</button>
-                          </div>
-                        );
-                      })}
-                      {tot !== 100 && (
-                        <div style={{ fontSize: 10, color: "#ff8a65" }}>
-                          ⚠ Totaal is {tot}% — moet 100% zijn voor correcte berekening
-                        </div>
-                      )}
+          return (
+            <div key={task.id} style={{
+              marginLeft: indent,
+              borderRadius: 8,
+              border: `1px solid ${isOk ? "#1b5e20" : hasAny ? "#e65100" : "#1e4976"}`,
+              overflow: "hidden",
+            }}>
+              {/* Task header row */}
+              <div style={{
+                display: "flex", alignItems: "center", gap: 8,
+                padding: "8px 12px",
+                background: isOk ? "rgba(46,125,50,.1)" : hasAny ? "rgba(230,81,0,.07)" : "rgba(255,255,255,.02)",
+                flexWrap: "wrap",
+              }}>
+                {/* Status dot */}
+                <span style={{ fontSize: 12, flexShrink: 0 }}>
+                  {isOk ? "🟢" : hasAny ? "🟡" : "⚪"}
+                </span>
+
+                {/* Naam */}
+                <input
+                  value={task.name}
+                  onChange={e => updateTask(task.id, "name", e.target.value)}
+                  style={{
+                    ...S.input,
+                    fontWeight: isSubtask ? 400 : 700,
+                    color: isSubtask ? "#90a4ae" : "#cfd8dc",
+                    flex: "1 1 140px",
+                    minWidth: 100,
+                  }}
+                />
+
+                {/* Start */}
+                <input
+                  type="date"
+                  value={dateToInput(task.start)}
+                  onChange={e => updateTask(task.id, "start", inputToDate(e.target.value))}
+                  style={S.dateInput}
+                />
+
+                {/* Finish */}
+                <input
+                  type="date"
+                  value={dateToInput(task.finish)}
+                  onChange={e => updateTask(task.id, "finish", inputToDate(e.target.value))}
+                  style={S.dateInput}
+                />
+
+                {/* Kosten indicator */}
+                {taskKosten > 0 && (
+                  <span style={{ fontSize: 10, color: "#546e7a", whiteSpace: "nowrap" }}>
+                    {euro(taskKosten)}
+                  </span>
+                )}
+
+                {/* % totaal */}
+                {hasAny && (
+                  <span style={{ fontSize: 10, fontWeight: 700, color: isOk ? "#4caf50" : "#ff8a65", whiteSpace: "nowrap" }}>
+                    {tot}%
+                  </span>
+                )}
+
+                {/* Acties */}
+                <button onClick={() => addTask(task.id)} style={{ ...S.btnSmall, fontSize: 9, padding: "3px 8px" }}>
+                  + subtaak
+                </button>
+                <button onClick={() => addKoppeling(task.id)} style={{ ...S.btnSmall, fontSize: 9, padding: "3px 8px" }}>
+                  + koppel
+                </button>
+                <button onClick={() => deleteTask(task.id)} style={S.btnDanger} title="Verwijderen">×</button>
+              </div>
+
+              {/* Koppelingen */}
+              {kops.length > 0 && (
+                <div style={{ background: "#080f18", padding: "7px 12px 8px 44px", display: "flex", flexDirection: "column", gap: 5 }}>
+                  {kops.map((k, idx) => {
+                    const kKosten = kostenPerHoofdstuk[k.hoofdstuk] || 0;
+                    const toegewezen = kKosten * k.percentage / 100;
+                    return (
+                      <div key={idx} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                        <select
+                          value={k.hoofdstuk}
+                          onChange={e => updateKoppeling(task.id, idx, "hoofdstuk", e.target.value)}
+                          style={{ ...S.select, flex: "1 1 180px" }}
+                        >
+                          {HOOFDSTUKKEN.map(h => (
+                            <option key={h} value={h}>{CHAP_SHORT[h] || h}</option>
+                          ))}
+                        </select>
+
+                        <input
+                          type="number" min={0} max={100} step={5}
+                          value={k.percentage}
+                          onChange={e => updateKoppeling(task.id, idx, "percentage", Math.min(100, parseInt(e.target.value) || 0))}
+                          style={{ ...S.input, width: 52, textAlign: "right" }}
+                        />
+                        <span style={{ fontSize: 10, color: "#37474f" }}>%</span>
+
+                        {kKosten > 0 && (
+                          <span style={{ fontSize: 10, color: "#546e7a", whiteSpace: "nowrap" }}>
+                            → {euro(toegewezen)}
+                          </span>
+                        )}
+
+                        <button onClick={() => removeKoppeling(task.id, idx)} style={S.btnDanger}>×</button>
+                      </div>
+                    );
+                  })}
+                  {tot !== 100 && tot > 0 && (
+                    <div style={{ fontSize: 10, color: "#ff8a65" }}>
+                      ⚠ Totaal is {tot}% — moet 100% zijn
                     </div>
                   )}
                 </div>
-              );
-            })}
-          </div>
-        </div>
-      )}
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      {/* Onderaan: werkpakket toevoegen */}
+      <button onClick={() => addTask(null)} style={S.btnAdd}>
+        + werkpakket toevoegen
+      </button>
     </div>
   );
 }
