@@ -35,80 +35,150 @@ const CHAP_SHORT = {
   "TER BESCHIKKING STELLEN": "T.b.s.",
 };
 
+// Robust date parser: handles Excel serials, JS Date objects, and many string formats
 function parseDate(v) {
   if (!v) return null;
-  if (v instanceof Date) return v;
-  // Excel serial number
-  if (typeof v === "number") {
-    const d = new Date((v - 25569) * 86400 * 1000);
+  if (v instanceof Date) return isNaN(v) ? null : v;
+  // Excel serial number (integer or float, but NOT a year like 2025)
+  if (typeof v === "number" && v > 40000 && v < 60000) {
+    // Excel epoch: Jan 1 1900 = 1, but there's a leap year bug so offset is 25569 for Unix epoch
+    const d = new Date(Math.round((v - 25569) * 86400 * 1000));
     return isNaN(d) ? null : d;
   }
-  // String formats: dd-mm-yyyy, dd/mm/yyyy, yyyy-mm-dd
   const s = String(v).trim();
-  const m1 = s.match(/^(\d{1,2})[-/](\d{1,2})[-/](\d{4})$/);
-  if (m1) return new Date(+m1[3], +m1[2] - 1, +m1[1]);
-  const m2 = s.match(/^(\d{4})[-/](\d{1,2})[-/](\d{1,2})$/);
-  if (m2) return new Date(+m2[1], +m2[2] - 1, +m2[3]);
+  if (!s) return null;
+  // dd-mm-yyyy or d-m-yyyy
+  let m = s.match(/^(\d{1,2})[-\/\.](\d{1,2})[-\/\.](\d{4})$/);
+  if (m) return new Date(+m[3], +m[2] - 1, +m[1]);
+  // yyyy-mm-dd
+  m = s.match(/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/);
+  if (m) return new Date(+m[1], +m[2] - 1, +m[3]);
+  // "1 apr 2025", "01 april 2025", "ma 1 apr 2025"
+  const NL_MONTHS = {jan:0,feb:1,mrt:2,mar:2,apr:3,mei:4,jun:5,jul:6,aug:7,sep:8,okt:9,oct:9,nov:10,dec:11};
+  m = s.match(/(\d{1,2})\s+([a-z]+)\s+(\d{4})/i);
+  if (m) {
+    const mo = NL_MONTHS[m[2].toLowerCase().substring(0,3)];
+    if (mo !== undefined) return new Date(+m[3], mo, +m[1]);
+  }
+  // "apr 1, 2025"
+  m = s.match(/([a-z]+)\s+(\d{1,2})[,\s]+(\d{4})/i);
+  if (m) {
+    const mo = NL_MONTHS[m[1].toLowerCase().substring(0,3)];
+    if (mo !== undefined) return new Date(+m[3], mo, +m[2]);
+  }
+  // Fallback: let JS try
   const d = new Date(s);
   return isNaN(d) ? null : d;
 }
 
-function parseMSProject(arrayBuffer) {
-  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: "array", cellDates: true });
-  const ws = wb.Sheets[wb.SheetNames[0]];
-  const data = XLSX.utils.sheet_to_json(ws, { header: 1, defval: null, raw: false });
+// Keyword sets for column detection
+const COL_KEYWORDS = {
+  name:   ["taaknaam","task name","name","naam","taak"],
+  start:  ["begin","start","startdatum","begindatum"],
+  finish: ["voltooiing","finish","einddatum","einde","end","gereed"],
+  level:  ["overzichtsniveau","outline level","niveau","wbs level","level"],
+  pct:    ["% voltooid","% complete","voortgang","progress","gereedheid"],
+  id:     ["id","nr","nummer"],
+  dur:    ["duur","duration"],
+};
 
-  // Find header row (contains "Taaknaam" or "Task Name" or "Name")
-  let headerRow = -1;
+function detectCol(headerRow, key) {
+  const kws = COL_KEYWORDS[key];
+  for (let j = 0; j < headerRow.length; j++) {
+    const c = headerRow[j] ? String(headerRow[j]).toLowerCase().trim() : "";
+    if (kws.some(k => c === k || c.startsWith(k))) return j;
+  }
+  return -1;
+}
+
+function parseMSProject(arrayBuffer) {
+  // raw:true keeps numbers as numbers, cellDates:true converts date serials
+  const wb = XLSX.read(new Uint8Array(arrayBuffer), { type: "array", cellDates: true, raw: true });
+  const ws = wb.Sheets[wb.SheetNames[0]];
+  // Try every sheet, use the one with most tasks
+  let bestTasks = [];
+  for (const sheetName of wb.SheetNames) {
+    const sheet = wb.Sheets[sheetName];
+    const data = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: null });
+    const tasks = tryParseMSProjectSheet(data);
+    if (tasks.length > bestTasks.length) bestTasks = tasks;
+  }
+  return bestTasks;
+}
+
+function tryParseMSProjectSheet(data) {
+  // Find header row: first row where we can detect a name column
+  let headerRowIdx = -1;
   let colMap = {};
-  for (let i = 0; i < Math.min(10, data.length); i++) {
-    const row = data[i].map(c => c ? String(c).toLowerCase().trim() : "");
-    const nameIdx = row.findIndex(c =>
-      c.includes("taaknaam") || c === "name" || c === "task name" || c === "naam"
-    );
-    if (nameIdx >= 0) {
-      headerRow = i;
-      row.forEach((c, j) => {
-        if (c.includes("taaknaam") || c === "name" || c === "task name" || c === "naam") colMap.name = j;
-        if (c.includes("begin") || c === "start") colMap.start = j;
-        if (c.includes("voltooiing") || c === "finish" || c === "einde" || c === "end") colMap.finish = j;
-        if (c.includes("duur") || c === "duration") colMap.duration = j;
-        if (c.includes("overzicht") || c.includes("outline") || c.includes("level") || c.includes("niveau")) colMap.level = j;
-        if (c.includes("% vol") || c.includes("complete") || c.includes("voortgang")) colMap.pct = j;
-        if (c.includes("id") && j < 3) colMap.id = j;
-      });
+
+  for (let i = 0; i < Math.min(15, data.length); i++) {
+    const row = data[i] || [];
+    const nameCol = detectCol(row, "name");
+    if (nameCol >= 0) {
+      headerRowIdx = i;
+      colMap.name   = nameCol;
+      colMap.start  = detectCol(row, "start");
+      colMap.finish = detectCol(row, "finish");
+      colMap.level  = detectCol(row, "level");
+      colMap.pct    = detectCol(row, "pct");
+      colMap.id     = detectCol(row, "id");
       break;
     }
   }
 
-  if (headerRow < 0 || colMap.name === undefined) {
-    // Fallback: assume first row is header, col 1 = name, col 3 = start, col 4 = finish
-    headerRow = 0;
-    colMap = { id: 0, name: 1, duration: 2, start: 3, finish: 4, pct: 5, level: 8 };
+  // Fallback: if no header found, assume MS Project default export layout
+  // ID | Name | Duration | Start | Finish | % Complete | ... | Outline Level
+  if (headerRowIdx < 0) {
+    headerRowIdx = 0;
+    // Scan first data rows to guess columns heuristically
+    for (let i = 1; i < Math.min(20, data.length); i++) {
+      const row = data[i] || [];
+      // Find the column with the longest text (= task name)
+      // Find two date-like columns (start, finish)
+      const dates = [];
+      let nameGuess = -1;
+      for (let j = 0; j < row.length; j++) {
+        const v = row[j];
+        if (v instanceof Date || (typeof v === "number" && v > 40000 && v < 60000)) {
+          dates.push(j);
+        }
+        if (typeof v === "string" && v.length > 5 && nameGuess < 0) nameGuess = j;
+      }
+      if (dates.length >= 2 && nameGuess >= 0) {
+        colMap = { name: nameGuess, start: dates[0], finish: dates[1], level: -1, pct: -1, id: 0 };
+        break;
+      }
+    }
+    if (colMap.name === undefined) return []; // can't parse
   }
 
   const tasks = [];
-  for (let i = headerRow + 1; i < data.length; i++) {
-    const row = data[i];
-    const name = row[colMap.name] ? String(row[colMap.name]).trim() : "";
-    if (!name || name === "") continue;
+  for (let i = headerRowIdx + 1; i < data.length; i++) {
+    const row = data[i] || [];
+    const rawName = row[colMap.name];
+    if (!rawName) continue;
+    const name = String(rawName).trim();
+    if (!name) continue;
 
-    const start = parseDate(colMap.start !== undefined ? row[colMap.start] : null);
-    const finish = parseDate(colMap.finish !== undefined ? row[colMap.finish] : null);
-    const level = colMap.level !== undefined ? (parseInt(row[colMap.level]) || 0) : name.match(/^(\s+)/)?.[1]?.length / 2 || 0;
-    const pct = colMap.pct !== undefined ? (parseFloat(String(row[colMap.pct]).replace("%","")) || 0) : 0;
-    const id = colMap.id !== undefined ? (row[colMap.id] || i) : i;
+    const start  = parseDate(colMap.start  >= 0 ? row[colMap.start]  : null);
+    const finish = parseDate(colMap.finish >= 0 ? row[colMap.finish] : null);
+    if (!start || !finish) continue; // skip rows without dates
 
-    // Determine indent level from leading spaces if no outline level col
-    const indent = name.match(/^(\s+)/)?.[1]?.length || 0;
-    const cleanName = name.trim();
-    const effectiveLevel = level || Math.floor(indent / 2);
-
-    if (start && finish && cleanName) {
-      tasks.push({ id: String(id), name: cleanName, start, finish, level: effectiveLevel, pct, indent });
+    // Level: from outline level col, or from leading spaces in name
+    let level = 0;
+    if (colMap.level >= 0 && row[colMap.level] != null) {
+      level = parseInt(row[colMap.level]) || 0;
+    } else {
+      // Count leading spaces as indent proxy
+      const spaces = String(rawName).match(/^(\s+)/);
+      level = spaces ? Math.floor(spaces[1].length / 2) : 0;
     }
-  }
 
+    const pct = colMap.pct >= 0 ? (parseFloat(String(row[colMap.pct] || "").replace(/[%\s]/g,"")) || 0) : 0;
+    const id  = colMap.id >= 0 && row[colMap.id] != null ? String(row[colMap.id]) : String(i);
+
+    tasks.push({ id, name, start, finish, level, pct });
+  }
   return tasks;
 }
 
@@ -152,7 +222,9 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
 
   const onDrop = useCallback(e => {
     e.preventDefault();
+    e.stopPropagation();
     setDragging(false);
+    e.currentTarget && (e.currentTarget.style.borderColor = "#1e4976");
     const f = e.dataTransfer.files[0];
     if (f) handleFile(f);
   }, [handleFile]);
@@ -207,9 +279,9 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
           </div>
           <div
             onDrop={onDrop}
-            onDragOver={e => { e.preventDefault(); setDragging(true); }}
-            onDragLeave={() => setDragging(false)}
-            onClick={() => document.getElementById("planningFile").click()}
+            onDragOver={e => { e.preventDefault(); e.stopPropagation(); setDragging(true); }}
+            onDragLeave={e => { e.stopPropagation(); setDragging(false); }}
+            onClick={() => { document.getElementById("planningFile").value=""; document.getElementById("planningFile").click(); }}
             style={{
               border: `2px dashed ${dragging ? "#42a5f5" : "#1e4976"}`,
               borderRadius: 14, padding: "50px 28px", textAlign: "center",
@@ -222,7 +294,7 @@ export default function PagePlanning({ tasks, setTasks, koppelingen, setKoppelin
             <div style={{ fontSize: 11, color: "#37474f" }}>Excel export (.xlsx) van MS Project taakoverzicht</div>
           </div>
           <input id="planningFile" type="file" accept=".xlsx" style={{ display: "none" }}
-            onChange={e => e.target.files[0] && handleFile(e.target.files[0])} />
+            onChange={e => { if (e.target.files[0]) handleFile(e.target.files[0]); }} />
 
           <div style={{ marginTop: 24, padding: 18, background: "rgba(255,255,255,.03)", borderRadius: 10, border: "1px solid #1e4976" }}>
             <div style={{ fontSize: 10, color: "#546e7a", letterSpacing: 1, marginBottom: 10 }}>HOE TE EXPORTEREN UIT MS PROJECT</div>

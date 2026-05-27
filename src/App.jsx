@@ -18,18 +18,29 @@ const euro = v => new Intl.NumberFormat("nl-NL",{style:"currency",currency:"EUR"
 const fmtP = v => (!isFinite(v)||v==null)?"—":(v*100).toFixed(1)+"%";
 const num = v => new Intl.NumberFormat("nl-NL",{maximumFractionDigits:2}).format(v||0);
 
+// Normalize any cell value to a clean postnr string or ""
+function toPostnr(val) {
+  if (val == null) return "";
+  // Number: 202010 or 202010.0
+  const n = typeof val === "number" ? Math.round(val) : parseInt(String(val).replace(/[^0-9]/g, ""), 10);
+  if (!isNaN(n) && n >= 100000 && n <= 999999) return String(n);
+  return "";
+}
+
 function parseInschrijfstaat(buf) {
-  const wb=XLSX.read(new Uint8Array(buf),{type:"array"});
+  // Use raw:true so numbers stay as numbers, not formatted strings
+  const wb=XLSX.read(new Uint8Array(buf),{type:"array",raw:true});
   const ws=wb.Sheets[wb.SheetNames[0]];
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
   const posts=[],sks=[];
   data.forEach(row=>{
-    const v=row[1]!=null?String(row[1]).trim():"";
-    if(/^\d{6}$/.test(v)&&!v.startsWith("9")){
-      const h=parseFloat(row[4])||0,p=parseFloat(row[7])||0;
-      if(h>0)posts.push({postnr:v,hoeveelheid:h,inschrijfprijs:p});
-    }
-    if(/^9\d{5}$/.test(v)){
+    // Try col B (index 1) — the standard column for postnr
+    const v = toPostnr(row[1]);
+    if (!v) return;
+    if (!v.startsWith("9")) {
+      const h=parseFloat(row[4])||0, p=parseFloat(row[7])||0;
+      if(h>0) posts.push({postnr:v,hoeveelheid:h,inschrijfprijs:p});
+    } else {
       sks.push({postnr:v,omschrijving:row[2]?String(row[2]).split(".")[0].trim():v,pct:parseFloat(row[7])||0,interneKosten:0});
     }
   });
@@ -129,7 +140,7 @@ export default function App() {
           {posts.length>0&&<div style={{fontSize:10,color:"#37474f",textAlign:"right"}}><div style={{color:"#546e7a"}}>{projectName.substring(0,30)}</div><div style={{color:"#1976d2",fontWeight:700}}>{euro(totals.ti)}</div></div>}
           <button onClick={()=>fileRef.current.click()} style={{background:"linear-gradient(135deg,#1976d2,#0d47a1)",border:"none",color:"#fff",padding:"7px 14px",borderRadius:6,cursor:"pointer",fontSize:10,fontWeight:700,letterSpacing:1,fontFamily:"inherit"}}>+ INSCHRIJFSTAAT</button>
         </div>
-        <input ref={fileRef} type="file" accept=".xlsx" style={{display:"none"}} onChange={e=>e.target.files[0]&&handleInschrijfstaat(e.target.files[0])}/>
+        <input ref={fileRef} type="file" accept=".xlsx" style={{display:"none"}} onChange={e=>{ if(e.target.files[0]) handleInschrijfstaat(e.target.files[0]); }}/>
       </header>
 
       {page==="begroting"&&(posts.length===0?(
@@ -137,7 +148,12 @@ export default function App() {
           <div style={{fontSize:40,marginBottom:14}}>📋</div>
           <h1 style={{fontSize:20,fontWeight:900,background:"linear-gradient(90deg,#90caf9,#42a5f5)",WebkitBackgroundClip:"text",WebkitTextFillColor:"transparent",marginBottom:8}}>WERKBEGROTING GENERATOR</h1>
           <p style={{color:"#546e7a",fontSize:12,marginBottom:28}}>Laad een inschrijfstaat · Koppel de planning · Zie de cashflow</p>
-          <div onClick={()=>fileRef.current.click()} style={{border:"2px dashed #1e4976",borderRadius:14,padding:"44px 28px",cursor:"pointer",background:"rgba(25,118,210,.03)",transition:"all .2s"}} onMouseEnter={e=>{e.currentTarget.style.borderColor="#42a5f5"}} onMouseLeave={e=>{e.currentTarget.style.borderColor="#1e4976"}}>
+          <div
+            onClick={()=>{ fileRef.current.value=""; fileRef.current.click(); }}
+            onDragOver={e=>{ e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#42a5f5"; e.currentTarget.style.background="rgba(25,118,210,.1)"; }}
+            onDragLeave={e=>{ e.currentTarget.style.borderColor="#1e4976"; e.currentTarget.style.background="rgba(25,118,210,.03)"; }}
+            onDrop={e=>{ e.preventDefault(); e.stopPropagation(); e.currentTarget.style.borderColor="#1e4976"; e.currentTarget.style.background="rgba(25,118,210,.03)"; const f=e.dataTransfer.files[0]; if(f)handleInschrijfstaat(f); }}
+            style={{border:"2px dashed #1e4976",borderRadius:14,padding:"44px 28px",cursor:"pointer",background:"rgba(25,118,210,.03)",transition:"all .2s"}}>
             <div style={{fontSize:13,color:"#90caf9",fontWeight:700,marginBottom:6}}>Sleep inschrijfstaat hier of klik</div>
             <div style={{fontSize:11,color:"#37474f"}}>.xlsx uitvoer van de bestekposter</div>
           </div>
