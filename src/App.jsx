@@ -21,27 +21,35 @@ const num = v => new Intl.NumberFormat("nl-NL",{maximumFractionDigits:2}).format
 // Normalize any cell value to a clean postnr string or ""
 function toPostnr(val) {
   if (val == null) return "";
-  // Number: 202010 or 202010.0
   const n = typeof val === "number" ? Math.round(val) : parseInt(String(val).replace(/[^0-9]/g, ""), 10);
-  if (!isNaN(n) && n >= 100000 && n <= 999999) return String(n);
+  // Accept 6-digit HELIX postnrs AND 7-digit project-specific postnrs (8800xxx etc.)
+  if (!isNaN(n) && n >= 100000 && n <= 9999999) return String(n);
   return "";
 }
 
 function parseInschrijfstaat(buf) {
-  // Use raw:true so numbers stay as numbers, not formatted strings
   const wb=XLSX.read(new Uint8Array(buf),{type:"array",raw:true});
   const ws=wb.Sheets[wb.SheetNames[0]];
   const data=XLSX.utils.sheet_to_json(ws,{header:1,defval:null});
   const posts=[],sks=[];
   data.forEach(row=>{
-    // Try col B (index 1) — the standard column for postnr
     const v = toPostnr(row[1]);
     if (!v) return;
-    if (!v.startsWith("9")) {
-      const h=parseFloat(row[4])||0, p=parseFloat(row[7])||0;
-      if(h>0) posts.push({postnr:v,hoeveelheid:h,inschrijfprijs:p});
+    const isStaart = v.startsWith("9") && v.length === 6;
+    if (!isStaart) {
+      // col9 = pre-calculated totaal (includes indexation, correct per post)
+      // col4 = hoeveelheid, col7 = prijs per eenheid
+      const col9 = parseFloat(row[9]) || 0;
+      const h = parseFloat(row[4]) || 0;
+      const p = parseFloat(row[7]) || 0;
+      // Use col9 when available — it reflects the correct (possibly indexed) total.
+      // Derive inschrijfprijs: if col9>0 use col9/h, else use col7 directly.
+      // Only include the post when it has an actual amount.
+      const totaal = col9 !== 0 ? col9 : (h > 0 ? h * p : 0);
+      const inschrijfprijs = totaal > 0 && h > 0 ? totaal / h : (p || 0);
+      if (totaal > 0) posts.push({postnr:v, hoeveelheid:h||1, inschrijfprijs});
     } else {
-      sks.push({postnr:v,omschrijving:row[2]?String(row[2]).split(".")[0].trim():v,pct:parseFloat(row[7])||0,interneKosten:0});
+      sks.push({postnr:v, omschrijving:row[2]?String(row[2]).split(".")[0].trim():v, pct:parseFloat(row[7])||0, interneKosten:0});
     }
   });
   const enriched=posts.map(p=>{
