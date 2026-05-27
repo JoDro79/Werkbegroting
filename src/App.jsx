@@ -411,7 +411,7 @@ export default function App() {
                     return(<tr key={sk.postnr} style={{borderBottom:"1px solid #dce8f5",background:i%2?"#f8fafc":"transparent"}}>
                       <td style={{padding:"7px 12px",color:"#6b8caa",fontFamily:"monospace"}}>{sk.postnr}</td>
                       <td style={{padding:"7px 12px",color:"#2c4a6e"}}>{sk.omschrijving}</td>
-                      <td style={{padding:"7px 12px",textAlign:"right"}}><input type="number" value={sk.pct} step={0.01} onChange={e=>setStaartkosten(prev=>prev.map((s,j)=>j===i?{...s,pct:parseFloat(e.target.value)||0}:s))} style={{background:"#deeaf8",border:"1px solid #1e4976",color:"#1565c0",padding:"3px 7px",borderRadius:4,fontSize:11,width:68,textAlign:"right",outline:"none",fontFamily:"inherit"}}/><span style={{color:"#8aabca",marginLeft:4}}>%</span></td>
+                      <td style={{padding:"7px 12px",textAlign:"right"}}><input type="number" value={parseFloat(sk.pct).toFixed(1)} step={0.1} onChange={e=>setStaartkosten(prev=>prev.map((s,j)=>j===i?{...s,pct:parseFloat(e.target.value)||0}:s))} style={{background:"#deeaf8",border:"1px solid #1e4976",color:"#1565c0",padding:"3px 7px",borderRadius:4,fontSize:11,width:68,textAlign:"right",outline:"none",fontFamily:"inherit"}}/><span style={{color:"#8aabca",marginLeft:4}}>%</span></td>
                       <td style={{padding:"7px 12px",textAlign:"right",color:"#1565c0"}}>{euro(b)}</td>
                       <td style={{padding:"7px 12px",textAlign:"right"}}><input type="number" value={sk.interneKosten||""} placeholder="0" onChange={e=>setStaartkosten(prev=>prev.map((s,j)=>j===i?{...s,interneKosten:parseFloat(e.target.value)||0}:s))} style={{background:"rgba(106,27,154,.08)",border:"1px solid #6a1b9a",color:"#7b1fa2",padding:"3px 7px",borderRadius:4,fontSize:11,width:110,textAlign:"right",outline:"none",fontFamily:"inherit"}}/></td>
                       <td style={{padding:"7px 12px",textAlign:"right",fontWeight:700,color:mar>=0?"#1b5e20":"#b71c1c"}}>{euro(mar)}</td>
@@ -420,7 +420,7 @@ export default function App() {
                 </tbody>
               </table>
               <div style={{marginTop:14,background:"#deeaf8",border:"1px solid #1976d2",borderRadius:7,padding:"12px 16px",display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:16}}>
-                {[["TOTAAL INSCHRIJFSOM",euro(totals.ti),"#1565c0"],["TOTAAL INTERNE KOSTEN",euro(totals.tk),"#7b1fa2"],["BRUTO MARGE",euro(totals.m)+" ? "+fmtP(totals.mp),totals.m>=0?"#1b5e20":"#b71c1c"]].map(([l,v,c])=>(
+                {[["TOTAAL INSCHRIJFSOM",euro(totals.ti),"#1565c0"],["TOTAAL INTERNE KOSTEN",euro(totals.tk),"#7b1fa2"],["BRUTO MARGE",euro(totals.m)+" · "+fmtP(totals.mp),totals.m>=0?"#1b5e20":"#b71c1c"]].map(([l,v,c])=>(
                   <div key={l}><div style={{fontSize:8,color:"#6b8caa",letterSpacing:2}}>{l}</div><div style={{fontSize:15,fontWeight:900,color:c,marginTop:3}}>{v}</div></div>
                 ))}
               </div>
@@ -428,7 +428,7 @@ export default function App() {
           )}
           {activeTab==="kostensoorten"&&(
             <div style={{maxWidth:640}}>
-              {(()=>{const total=catTotals.reduce((s,v)=>s+v,0);return CAT_LABELS.map((lbl,i)=>{const v=catTotals[i],bp=total>0?v/total:0;return(<div key={lbl} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:"#4a6785"}}>{lbl}</span><span style={{color:v>0?"#7b1fa2":"#8aabca"}}>{v>0?euro(v)+" ? "+fmtP(bp):"?"}</span></div><div style={{height:5,background:"#e8eef5",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:bp*100+"%",background:"hsl("+(200+i*15)+",70%,55%)",borderRadius:3}}/></div></div>);});})()}
+              {(()=>{const total=catTotals.reduce((s,v)=>s+v,0);return CAT_LABELS.map((lbl,i)=>{const v=catTotals[i];return(<div key={lbl} style={{marginBottom:9}}><div style={{display:"flex",justifyContent:"space-between",fontSize:10,marginBottom:3}}><span style={{color:"#4a6785"}}>{lbl}</span><span style={{color:v>0?"#7b1fa2":"#8aabca"}}>{v>0?euro(v):""}</span></div><div style={{height:5,background:"#e8eef5",borderRadius:3,overflow:"hidden"}}><div style={{height:"100%",width:total>0?v/total*100+"%":"0%",background:"hsl("+(200+i*15)+",70%,55%)",borderRadius:3}}/></div></div>);});})()}
               <div style={{marginTop:18,padding:"10px 14px",background:"#f5f8fc",borderRadius:7,border:"1px solid #1e4976",display:"flex",justifyContent:"space-between"}}>
                 <span style={{fontWeight:700,fontSize:11,color:"#1565c0"}}>TOTAAL INTERNE KOSTEN</span>
                 <span style={{fontSize:13,fontWeight:900,color:"#7b1fa2"}}>{euro(catTotals.reduce((s,v)=>s+v,0))}</span>
